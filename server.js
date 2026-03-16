@@ -337,10 +337,9 @@ app.post("/accept-pact", async (req, res) => {
   res.json({ success: true });
 });
 
-app.get("/debug/users", async (req, res) => {  // sans authRequired
+app.get("/debug/contacts", async (req, res) => {
   const db = await require("./db").getDb();
-  const r = db.exec("SELECT id, email, name FROM users");
-  console.log("USERS IN DB:", JSON.stringify(r));
+  const r = db.exec("SELECT id, owner_id, name, shared_secret FROM contacts");
   res.json(r.length ? r[0].values : []);
 });
 const PORT = process.env.PORT || 8080;
