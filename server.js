@@ -337,6 +337,12 @@ app.post("/accept-pact", async (req, res) => {
   res.json({ success: true });
 });
 
+app.get("/debug/users", async (req, res) => {  // sans authRequired
+  const db = await require("./db").getDb();
+  const r = db.exec("SELECT id, email, name FROM users");
+  console.log("USERS IN DB:", JSON.stringify(r));
+  res.json(r.length ? r[0].values : []);
+});
 const PORT = process.env.PORT || 8080;
 // Initialise la DB au démarrage pour créer les tables avant la première requête
 require("./db").getDb().then(() => {
