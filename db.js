@@ -13,18 +13,24 @@ async function getDb() {
   } else {
     db = new SQL.Database();
   }
+
+  // Ajout de owner_id pour isoler les comptes
   db.run(`
-    CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, device_id TEXT NOT NULL, shared_secret TEXT);    CREATE TABLE IF NOT EXISTS keys (id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, key_blob BLOB NOT NULL, status TEXT NOT NULL DEFAULT 'free');
+    CREATE TABLE IF NOT EXISTS contacts (
+      id TEXT PRIMARY KEY, 
+      owner_id TEXT NOT NULL, 
+      name TEXT NOT NULL, 
+      device_id TEXT NOT NULL, 
+      shared_secret TEXT
+    );
+    CREATE TABLE IF NOT EXISTS keys (id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, key_blob BLOB NOT NULL, status TEXT NOT NULL DEFAULT 'free');
     CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, key_id TEXT, contact_id TEXT, action TEXT NOT NULL, detail TEXT, timestamp INTEGER DEFAULT (strftime('%s','now')));
     CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
+
   db.run("INSERT OR IGNORE INTO config (key,value) VALUES (?,?)", ["device_id", "enclave-" + crypto.randomBytes(4).toString("hex")]);
   db.run("INSERT OR IGNORE INTO config (key,value) VALUES (?,?)", ["version", "2.0.0-pqc"]);
-  const res = db.exec("SELECT COUNT(*) as n FROM contacts");
-  if (res[0].values[0][0] === 0) {
-    db.run("INSERT INTO contacts (id,name,device_id) VALUES (?,?,?)", ["contact-alice", "Alice (Mon PC)", "device-alice"]);
-    db.run("INSERT INTO contacts (id,name,device_id) VALUES (?,?,?)", ["contact-bob", "Bob (PC 5151)", "device-bob"]);
-  }
+  
   save();
   return db;
 }
