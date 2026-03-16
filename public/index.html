@@ -1080,7 +1080,7 @@ async function generateAccountQR() {
     secret: r.pair_secret
   }));
 
-const url = `http://192.168.1.132:3000/meet?identity=${identity}`;
+const url = `${window.location.origin}/meet?identity=${identity}`;
   const qrR = await api('GET', `/qrcode-identity?url=${encodeURIComponent(url)}`);
   if (qrR.qr) {
     $('account-qr-img').src = qrR.qr;
