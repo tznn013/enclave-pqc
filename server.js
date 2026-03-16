@@ -36,10 +36,14 @@ app.get("/status", async (req, res) => {
 
 // ─── CONTACTS (FILTRÉS PAR OWNER) ────────────────────────────────
 app.get("/contacts", async (req, res) => {
-  const allContacts = await getContacts();
-  // On ne retourne que les contacts appartenant à l'utilisateur actuel
-  const mine = allContacts.filter(c => c.owner_id === OWNER_ID);
-  res.json(mine);
+  try {
+    const allContacts = await getContacts();
+    // On vérifie si owner_id existe avant de filtrer, sinon on donne tout
+    const mine = allContacts.filter(c => c.owner_id ? c.owner_id === OWNER_ID : true);
+    res.json(mine);
+  } catch (e) {
+    res.json([]); // Renvoie une liste vide au lieu de faire planter le site
+  }
 });
 
 // ─── AUDIT ───────────────────────────────────────────────────────
