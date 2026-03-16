@@ -422,6 +422,7 @@ body::after {
   box-shadow: 0 0 0 3px rgba(0,229,255,.08);
 }
 .form-textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
+.form-input-flex { width: 0; min-width: 0; flex: 1; }
 .form-select { cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238ba3c7' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
 
 /* ── BUTTONS ── */
@@ -911,10 +912,8 @@ canvas { display: block; width: 100%; cursor: crosshair; }
       <!-- Recherche utilisateurs -->
       <div class="card">
         <div class="card-title">🔍 Trouver un utilisateur</div>
-        <div style="display:flex;gap:8px">
-          <input class="form-input" id="search-query" placeholder="Nom ou email..." type="text" style="flex:1">
-          <button class="btn btn-primary" onclick="searchUsers()" style="flex-shrink:0">Chercher</button>
-        </div>
+        <input class="form-input" id="search-query" placeholder="Nom ou email..." type="text" style="width:100%;margin-bottom:8px">
+        <button class="btn btn-primary" onclick="searchUsers()" style="width:100%">Chercher</button>
         <div class="result" id="search-result" style="margin-top:8px"></div>
         <div id="search-results" style="margin-top:12px"></div>
       </div>

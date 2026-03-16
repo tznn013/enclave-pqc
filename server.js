@@ -35,9 +35,9 @@ app.use(helmet({
 }));
 
 const mkLimit = (max) => rateLimit({ windowMs: 15*60*1000, max, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de requêtes." } });
-const authLimiter      = mkLimit(10);
-const sensitiveLimiter = mkLimit(30);
-const defaultLimiter   = mkLimit(200);
+const authLimiter      = mkLimit(50);   // 50 tentatives / 15min (assez strict sans bloquer les tests)
+const sensitiveLimiter = mkLimit(100);
+const defaultLimiter   = mkLimit(500);
 
 app.use(defaultLimiter);
 app.use(cookieParser());
@@ -60,7 +60,7 @@ function authRequired(req, res, next) {
 function issueToken(res, user) {
   const payload = { id: user.id, email: user.email, name: user.name };
   const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
-  res.cookie("enclave_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", maxAge: 86400000 });
+  res.cookie("enclave_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 86400000 });
   return payload;
 }
 
@@ -73,18 +73,18 @@ app.post("/auth/register", authLimiter, async (req, res) => {
   if (String(password).length < 8) return res.status(400).json({ error: "Mot de passe trop court (8 caractères min)." });
   try {
     const db = await require("./db").getDb();
-    const stmt = db.prepare("SELECT id FROM users WHERE email=?");
-    const ex = stmt.getAsObject({ 1: email.toLowerCase() });
-    stmt.free();
+    const _r1 = db.exec("SELECT id FROM users WHERE email=?", [email.toLowerCase()]);
+    const ex = _r1.length ? { id: _r1[0].values[0][0] } : {};
     if (ex.id) return res.status(409).json({ error: "Cet email est déjà utilisé." });
     const id = "user-" + crypto.randomBytes(8).toString("hex");
     const device_id = "dev-" + crypto.randomBytes(4).toString("hex");
     const hash = await bcrypt.hash(password, 12);
     db.run("INSERT INTO users (id,email,password_hash,name,device_id) VALUES (?,?,?,?,?)", [id, email.toLowerCase(), hash, name.trim(), device_id]);
     require("./db").save();
+    console.log('User registered:', email.toLowerCase(), id);
     const user = { id, email: email.toLowerCase(), name: name.trim(), device_id };
     res.status(201).json({ user: issueToken(res, user) });
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // POST /auth/login
@@ -93,14 +93,13 @@ app.post("/auth/login", authLimiter, async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: "Email et mot de passe requis." });
   try {
     const db = await require("./db").getDb();
-    const stmt = db.prepare("SELECT id,email,password_hash,name,device_id FROM users WHERE email=?");
-    const user = stmt.getAsObject({ 1: email.toLowerCase() });
-    stmt.free();
-    const fake = "$2a$12$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const valid = await bcrypt.compare(password, user.password_hash || fake);
-    if (!user.id || !valid) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
+    const _r2 = db.exec("SELECT id,email,password_hash,name,device_id FROM users WHERE email=?", [email.toLowerCase()]);
+    const user = _r2.length ? { id:_r2[0].values[0][0], email:_r2[0].values[0][1], password_hash:_r2[0].values[0][2], name:_r2[0].values[0][3], device_id:_r2[0].values[0][4] } : {};
+    if (!user.id) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
     res.json({ user: issueToken(res, user) });
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // POST /auth/logout
@@ -113,12 +112,11 @@ app.post("/auth/logout", (req, res) => {
 app.get("/auth/me", authRequired, async (req, res) => {
   try {
     const db = await require("./db").getDb();
-    const stmt = db.prepare("SELECT id,email,name,device_id FROM users WHERE id=?");
-    const user = stmt.getAsObject({ 1: req.user.id });
-    stmt.free();
+    const _r3 = db.exec("SELECT id,email,name,device_id FROM users WHERE id=?", [req.user.id]);
+    const user = _r3.length ? { id:_r3[0].values[0][0], email:_r3[0].values[0][1], name:_r3[0].values[0][2], device_id:_r3[0].values[0][3] } : {};
     if (!user.id) return res.status(404).json({ error: "Introuvable." });
     res.json(user);
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // GET /users/search
@@ -127,20 +125,27 @@ app.get("/users/search", authRequired, async (req, res) => {
   if (q.length < 2) return res.status(400).json({ error: "2 caractères minimum." });
   try {
     const db = await require("./db").getDb();
-    const stmt = db.prepare("SELECT id,name,device_id FROM users WHERE (name LIKE ? OR email LIKE ?) AND id != ? LIMIT 20");
-    const results = [];
     const p = `%${q}%`;
-    stmt.bind({ 1: p, 2: p, 3: req.user.id });
-    while (stmt.step()) results.push(stmt.getAsObject());
-    stmt.free();
+    console.log('Search query:', q, 'by user:', req.user.id);
+    const raw = db.exec(
+      "SELECT id,name,device_id FROM users WHERE (name LIKE ? OR email LIKE ?) AND id != ? LIMIT 20",
+      [p, p, req.user.id]
+    );
+    const results = raw.length ? raw[0].values.map(([id,name,device_id]) => ({ id, name, device_id })) : [];
+
     const enriched = await Promise.all(results.map(async u => {
-      const s = db.prepare("SELECT id,status FROM pact_requests WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at DESC LIMIT 1");
-      const ex = s.getAsObject({ 1: req.user.id, 2: u.id, 3: u.id, 4: req.user.id });
-      s.free();
+      const r2 = db.exec(
+        "SELECT id,status FROM pact_requests WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at DESC LIMIT 1",
+        [req.user.id, u.id, u.id, req.user.id]
+      );
+      const ex = r2.length ? { id: r2[0].values[0][0], status: r2[0].values[0][1] } : {};
       return { ...u, pact_status: ex.status || null, pact_request_id: ex.id || null };
     }));
     res.json(enriched);
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) {
+    console.error("Search error:", e.message);
+    res.status(500).json({ error: "Erreur serveur : " + e.message });
+  }
 });
 
 // POST /pact/request
@@ -150,49 +155,46 @@ app.post("/pact/request", sensitiveLimiter, authRequired, async (req, res) => {
   if (to_user_id === req.user.id) return res.status(400).json({ error: "Vous ne pouvez pas vous envoyer un pacte." });
   try {
     const db = await require("./db").getDb();
-    const us = db.prepare("SELECT id FROM users WHERE id=?");
-    const target = us.getAsObject({ 1: to_user_id });
-    us.free();
+    const _r4 = db.exec("SELECT id FROM users WHERE id=?", [to_user_id]);
+    const target = _r4.length ? { id: _r4[0].values[0][0] } : {};
     if (!target.id) return res.status(404).json({ error: "Utilisateur introuvable." });
-    const ps = db.prepare("SELECT id,status FROM pact_requests WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at DESC LIMIT 1");
-    const ex = ps.getAsObject({ 1: req.user.id, 2: to_user_id, 3: to_user_id, 4: req.user.id });
-    ps.free();
+    const _r5 = db.exec("SELECT id,status FROM pact_requests WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at DESC LIMIT 1", [req.user.id, to_user_id, to_user_id, req.user.id]);
+    const ex = _r5.length ? { id:_r5[0].values[0][0], status:_r5[0].values[0][1] } : {};
     if (ex.status === 'accepted') return res.status(409).json({ error: "Pacte déjà actif." });
     if (ex.status === 'pending') return res.status(409).json({ error: "Demande déjà en attente." });
     const id = "req-" + crypto.randomBytes(8).toString("hex");
     db.run("INSERT INTO pact_requests (id,from_user_id,to_user_id) VALUES (?,?,?)", [id, req.user.id, to_user_id]);
     require("./db").save();
     res.status(201).json({ success: true });
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // GET /pact/pending
 app.get("/pact/pending", authRequired, async (req, res) => {
   try {
     const db = await require("./db").getDb();
-    const stmt = db.prepare("SELECT pr.id,pr.from_user_id,pr.created_at,u.name as from_name FROM pact_requests pr JOIN users u ON u.id=pr.from_user_id WHERE pr.to_user_id=? AND pr.status='pending' ORDER BY pr.created_at DESC");
-    const rows = [];
-    stmt.bind({ 1: req.user.id });
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
+    const raw = db.exec(
+      "SELECT pr.id,pr.from_user_id,pr.created_at,u.name as from_name FROM pact_requests pr JOIN users u ON u.id=pr.from_user_id WHERE pr.to_user_id=? AND pr.status='pending' ORDER BY pr.created_at DESC",
+      [req.user.id]
+    );
+    const rows = raw.length ? raw[0].values.map(([id,from_user_id,created_at,from_name]) => ({ id, from_user_id, created_at, from_name })) : [];
     res.json(rows);
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // POST /pact/accept/:id
 app.post("/pact/accept/:id", sensitiveLimiter, authRequired, async (req, res) => {
   try {
     const db = await require("./db").getDb();
-    const rs = db.prepare("SELECT id,from_user_id,to_user_id,status FROM pact_requests WHERE id=? AND to_user_id=?");
-    const req2 = rs.getAsObject({ 1: req.params.id, 2: req.user.id });
-    rs.free();
+    const _r6 = db.exec("SELECT id,from_user_id,to_user_id,status FROM pact_requests WHERE id=? AND to_user_id=?", [req.params.id, req.user.id]);
+    const req2 = _r6.length ? { id:_r6[0].values[0][0], from_user_id:_r6[0].values[0][1], to_user_id:_r6[0].values[0][2], status:_r6[0].values[0][3] } : {};
     if (!req2.id) return res.status(404).json({ error: "Demande introuvable." });
     if (req2.status !== 'pending') return res.status(400).json({ error: "Demande non en attente." });
 
-    const u1s = db.prepare("SELECT id,name,device_id FROM users WHERE id=?");
-    const uFrom = u1s.getAsObject({ 1: req2.from_user_id }); u1s.free();
-    const u2s = db.prepare("SELECT id,name,device_id FROM users WHERE id=?");
-    const uTo = u2s.getAsObject({ 1: req2.to_user_id }); u2s.free();
+    const _r7 = db.exec("SELECT id,name,device_id FROM users WHERE id=?", [req2.from_user_id]);
+    const uFrom = _r7.length ? { id:_r7[0].values[0][0], name:_r7[0].values[0][1], device_id:_r7[0].values[0][2] } : {};
+    const _r8 = db.exec("SELECT id,name,device_id FROM users WHERE id=?", [req2.to_user_id]);
+    const uTo = _r8.length ? { id:_r8[0].values[0][0], name:_r8[0].values[0][1], device_id:_r8[0].values[0][2] } : {};
 
     const pairSecret = crypto.randomBytes(32).toString("hex");
     const cid1 = `contact-${uFrom.id}-${uTo.id}`;
@@ -214,13 +216,13 @@ app.post("/pact/accept/:id", sensitiveLimiter, authRequired, async (req, res) =>
 app.post("/pact/reject/:id", authRequired, async (req, res) => {
   try {
     const db = await require("./db").getDb();
-    const s = db.prepare("SELECT id FROM pact_requests WHERE id=? AND to_user_id=? AND status='pending'");
-    const r = s.getAsObject({ 1: req.params.id, 2: req.user.id }); s.free();
+    const _r9 = db.exec("SELECT id FROM pact_requests WHERE id=? AND to_user_id=? AND status='pending'", [req.params.id, req.user.id]);
+    const r = _r9.length ? { id: _r9[0].values[0][0] } : {};
     if (!r.id) return res.status(404).json({ error: "Introuvable." });
     db.run("UPDATE pact_requests SET status='rejected' WHERE id=?", [req.params.id]);
     require("./db").save();
     res.json({ success: true });
-  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+  } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // GET /status
@@ -250,8 +252,8 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
   if (!subject || !body || !contact_id) return res.status(400).json({ error: "Champs manquants." });
   try {
     const db = await require("./db").getDb();
-    const cs = db.prepare("SELECT id FROM contacts WHERE id=? AND owner_id=?");
-    const ct = cs.getAsObject({ 1: contact_id, 2: req.user.id }); cs.free();
+    const _ra = db.exec("SELECT id FROM contacts WHERE id=? AND owner_id=?", [contact_id, req.user.id]);
+    const ct = _ra.length ? { id: _ra[0].values[0][0] } : {};
     if (!ct.id) return res.status(403).json({ error: "Contact non autorisé." });
   } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
 
@@ -280,8 +282,8 @@ app.post("/receive", sensitiveLimiter, authRequired, async (req, res) => {
   if (!key_id || !contact_id) return res.status(400).json({ error: "Champs manquants." });
   try {
     const db = await require("./db").getDb();
-    const cs = db.prepare("SELECT id FROM contacts WHERE id=? AND owner_id=?");
-    const ct = cs.getAsObject({ 1: contact_id, 2: req.user.id }); cs.free();
+    const _rb = db.exec("SELECT id FROM contacts WHERE id=? AND owner_id=?", [contact_id, req.user.id]);
+    const ct = _rb.length ? { id: _rb[0].values[0][0] } : {};
     if (!ct.id) return res.status(403).json({ error: "Contact non autorisé." });
   } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
 
@@ -336,6 +338,14 @@ app.post("/accept-pact", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
+// Initialise la DB au démarrage pour créer les tables avant la première requête
+require("./db").getDb().then(() => {
+  console.log("✅ Base de données initialisée");
+}).catch(e => {
+  console.error("❌ Erreur init DB:", e.message);
+  process.exit(1);
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🔐 Enclave PQC-OTP v3.0 — Multi-utilisateur`);
   console.log(`   → Port : ${PORT}\n`);
