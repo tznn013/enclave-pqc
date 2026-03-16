@@ -224,10 +224,13 @@ app.post("/accept-pact", async (req, res) => {
   res.json({ success: true });
 });
 
-// ─── DÉMARRAGE ───────────────────────────────────────────────────
+// ─── DÉMARRAGE SÉCURISÉ (Compatible Railway) ─────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
+
+// On ajoute '0.0.0.0' ici pour que Railway puisse router le trafic vers ton app
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n🔐 Enclave PQC-OTP v2.0 opérationnelle`);
-  console.log(`   → Port : ${PORT}`);
-  console.log(`   → Owner : ${OWNER_ID}\n`);
+  console.log(`   → URL : https://enclave-pqc-production-7090.up.railway.app`);
+  console.log(`   → Port : ${PORT}`);
+  console.log(`   → Owner : ${OWNER_ID}\n`);
 });
