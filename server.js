@@ -5,6 +5,7 @@ const path = require("path");
 const QRCode = require("qrcode");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const nodemailer = require("nodemailer");
 
 const { sign, verify, decryptPayload } = require("./crypto");
 const { generateKeyPool, consumeKey, findAndConsumeKey,
@@ -74,6 +75,8 @@ function escapeHtml(str) {
 
 // ─── STATUS ──────────────────────────────────────────────────────
 app.get("/status", async (req, res) => {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  const public_url = domain ? `https://${domain}` : null;
   res.json({
     running: true,
     owner: OWNER_ID,
@@ -81,7 +84,8 @@ app.get("/status", async (req, res) => {
     keys_available: await countAllFreeKeys(),
     version: "2.0.0-pqc",
     pqc_resistant: true,
-    confidentiality: "OTP-XOR end-to-end"
+    confidentiality: "OTP-XOR end-to-end",
+    public_url  // null en local, URL Railway en prod
   });
 });
 
@@ -123,6 +127,64 @@ app.post("/generate", sensitiveLimiter, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── SEND PACT EMAIL ─────────────────────────────────────────────
+// Envoie le QR de pacte directement par email — le QR ne s'affiche
+// jamais à l'écran, seul le destinataire légitime peut scanner.
+app.post("/send-pact-email", sensitiveLimiter, async (req, res) => {
+  const { to, from_name, meet_url } = req.body;
+  if (!to || !from_name || !meet_url) {
+    return res.status(400).json({ error: "to, from_name et meet_url requis" });
+  }
+
+  // Vérification basique de l'email
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return res.status(400).json({ error: "Email destinataire invalide" });
+  }
+
+  try {
+    // Génère le QR en PNG base64
+    const qrBuffer = await QRCode.toBuffer(meet_url, { width: 300, margin: 2 });
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: `"Enclave PQC" <${process.env.SMTP_USER}>`,
+      to,
+      subject: `🔐 Pacte de chiffrement — ${from_name}`,
+      text: `${from_name} vous invite à établir un canal chiffré OTP via Enclave PQC.\n\nScannez le QR code en pièce jointe pour accepter le pacte.\n\nCe lien est unique et à usage unique.`,
+      html: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;background:#0b0f1a;color:#e2eeff;padding:32px;border-radius:16px;">
+          <h2 style="color:#00e5ff;margin-bottom:8px;">🔐 Enclave PQC</h2>
+          <p style="color:#8ba3c7;margin-bottom:24px;">Canal chiffré One-Time Pad</p>
+          <p><strong>${from_name}</strong> vous invite à établir un canal de communication chiffré.</p>
+          <p style="margin:16px 0;color:#8ba3c7;">Scannez le QR code ci-dessous pour accepter le pacte. Ce lien est <strong>unique et secret</strong> — ne le partagez pas.</p>
+          <div style="text-align:center;margin:24px 0;">
+            <img src="cid:pact-qr" alt="QR Code Pacte" style="border-radius:12px;width:220px;height:220px;">
+          </div>
+          <p style="font-size:12px;color:#3d5470;margin-top:24px;">Enclave PQC-OTP — Chiffrement bout-en-bout garanti</p>
+        </div>`,
+      attachments: [{
+        filename: 'pacte-enclave.png',
+        content: qrBuffer,
+        cid: 'pact-qr'   // référencé dans le HTML via cid:
+      }]
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Email error:", e.message);
+    res.status(500).json({ error: "Échec envoi email : " + e.message });
   }
 });
 

@@ -769,11 +769,10 @@ canvas { display: block; width: 100%; cursor: crosshair; }
           </div>
         </div>
         <canvas id="sig-preview" height="70" style="border-radius:8px;background:var(--surface2);width:100%"></canvas>
-        <button class="btn btn-primary" onclick="generateAccountQR()">📱 Générer mon QR Code d'identité</button>
-        <div class="qr-wrap" id="account-qr">
-          <img id="account-qr-img" src="" alt="QR Code">
-          <div class="qr-url">Scannez pour établir le Pacte automatiquement</div>
-        </div>
+        <div class="form-label">Email du destinataire</div>
+        <input class="form-input" id="pact-email-dest" placeholder="bob@carousel.com" type="email">
+        <button class="btn btn-primary" onclick="sendPactByEmail()">📨 Envoyer le Pacte par email</button>
+        <div class="result" id="pact-email-result"></div>
       </div>
 
       <div class="card">
@@ -1080,7 +1079,8 @@ async function generateAccountQR() {
     secret: r.pair_secret
   }));
 
-const url = `${window.location.origin}/meet?identity=${identity}`;
+const baseUrl = status.public_url || window.location.origin;
+  const url = `${baseUrl}/meet?identity=${identity}`;
   const qrR = await api('GET', `/qrcode-identity?url=${encodeURIComponent(url)}`);
   if (qrR.qr) {
     $('account-qr-img').src = qrR.qr;
