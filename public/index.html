@@ -636,6 +636,100 @@ canvas { display: block; width: 100%; cursor: crosshair; }
   .stat-val { font-size: 1.4rem; }
 }
 
+
+/* ── AUTH OVERLAY ── */
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 32px;
+  max-width: 420px; width: 100%;
+}
+.auth-logo {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 28px;
+}
+.auth-logo-icon {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem;
+}
+.auth-logo-text { font-family: var(--mono); font-size: .85rem; font-weight: 700; color: var(--accent); letter-spacing: 3px; }
+.auth-tabs { display: flex; gap: 4px; margin-bottom: 24px; background: var(--surface2); border-radius: var(--radius-sm); padding: 4px; }
+.auth-tab {
+  flex: 1; padding: 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text2);
+  font-family: var(--sans); font-size: .82rem; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.auth-tab.active { background: var(--surface3); color: var(--text); }
+.auth-panel { display: none; }
+.auth-panel.active { display: block; }
+.auth-footer { margin-top: 16px; text-align: center; font-size: .72rem; color: var(--muted); }
+
+/* ── ANNUAIRE ── */
+.user-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.user-card-avatar {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 1rem; color: #000; flex-shrink: 0;
+}
+.user-card-info { flex: 1; }
+.user-card-name { font-weight: 600; font-size: .88rem; }
+.user-card-device { font-size: .65rem; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+.pact-req-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px; background: var(--accent2-dim);
+  border: 1px solid rgba(124,58,237,.25);
+  border-radius: var(--radius-sm); margin-bottom: 8px;
+}
+.pact-req-actions { display: flex; gap: 8px; margin-left: auto; }
+.btn-accept { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,.25); border-radius: 6px; padding: 6px 12px; font-size: .75rem; font-weight: 700; cursor: pointer; }
+.btn-reject { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,23,68,.2); border-radius: 6px; padding: 6px 12px; font-size: .75rem; font-weight: 700; cursor: pointer; }
+
+/* ── USER INFO IN SIDEBAR ── */
+.sidebar-user {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.sidebar-user-avatar {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 800; color: #000; flex-shrink: 0;
+}
+.sidebar-user-info { flex: 1; min-width: 0; }
+.sidebar-user-name { font-size: .78rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-user-email { font-size: .62rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-logout { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: .65rem; padding: 4px 8px; cursor: pointer; flex-shrink: 0; }
+.btn-logout:hover { color: var(--red); border-color: var(--red); }
+
+/* ── NOTIFICATION BADGE ── */
+.notif-badge {
+  background: var(--red); color: #fff;
+  font-family: var(--mono); font-size: .58rem;
+  padding: 2px 6px; border-radius: 99px; font-weight: 700;
+  display: none;
+}
+.notif-badge.visible { display: inline-block; }
+
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -646,6 +740,45 @@ canvas { display: block; width: 100%; cursor: crosshair; }
 
 <div class="orb orb-1"></div>
 <div class="orb orb-2"></div>
+
+
+<!-- ── AUTH OVERLAY ── -->
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🔐</div>
+      <div class="auth-logo-text">ENCLAVE PQC</div>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab('login')">Connexion</button>
+      <button class="auth-tab" onclick="switchAuthTab('register')">Inscription</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="auth-panel active" id="auth-login">
+      <div class="form-label">Email</div>
+      <input class="form-input" id="login-email" type="email" placeholder="alice@exemple.com" autocomplete="email">
+      <div class="form-label">Mot de passe</div>
+      <input class="form-input" id="login-password" type="password" placeholder="••••••••" autocomplete="current-password">
+      <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="doLogin()">Se connecter</button>
+      <div class="result" id="login-result"></div>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="auth-panel" id="auth-register">
+      <div class="form-label">Nom complet</div>
+      <input class="form-input" id="reg-name" type="text" placeholder="Alice Dupont" autocomplete="name">
+      <div class="form-label">Email</div>
+      <input class="form-input" id="reg-email" type="email" placeholder="alice@exemple.com" autocomplete="email">
+      <div class="form-label">Mot de passe <span style="color:var(--muted);font-size:.65rem">(8 caractères min)</span></div>
+      <input class="form-input" id="reg-password" type="password" placeholder="••••••••" autocomplete="new-password">
+      <button class="btn btn-purple" style="margin-top:16px;width:100%" onclick="doRegister()">Créer mon compte</button>
+      <div class="result" id="reg-result"></div>
+    </div>
+
+    <div class="auth-footer">Canal chiffré OTP · Post-Quantum Ready</div>
+  </div>
+</div>
 
 <div class="shell">
 
@@ -662,15 +795,24 @@ canvas { display: block; width: 100%; cursor: crosshair; }
       <div class="status-dot"></div>
       <span id="sb-device">Connexion...</span>
     </div>
+    <div class="sidebar-user" id="sidebar-user" style="display:none">
+      <div class="sidebar-user-avatar" id="sb-avatar">?</div>
+      <div class="sidebar-user-info">
+        <div class="sidebar-user-name" id="sb-name">—</div>
+        <div class="sidebar-user-email" id="sb-email">—</div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">↩</button>
+    </div>
     <nav class="sidebar-nav">
       <button class="nav-item active" data-page="home">
         <span class="nav-item-icon">🏠</span> Accueil
       </button>
+      <button class="nav-item" data-page="annuaire">
+        <span class="nav-item-icon">🔍</span> Annuaire
+        <span class="notif-badge" id="sb-notif">0</span>
+      </button>
       <button class="nav-item" data-page="account">
         <span class="nav-item-icon">👤</span> Mon Compte
-      </button>
-      <button class="nav-item" data-page="pact">
-        <span class="nav-item-icon">⚡</span> Le Pacte
       </button>
       <button class="nav-item" data-page="send">
         <span class="nav-item-icon">📤</span> Envoyer
@@ -708,8 +850,8 @@ canvas { display: block; width: 100%; cursor: crosshair; }
     <div class="mobile-nav">
       <div class="mobile-nav-inner">
         <button class="mobile-nav-item active" data-page="home">🏠 Accueil</button>
+        <button class="mobile-nav-item" data-page="annuaire">🔍 Annuaire</button>
         <button class="mobile-nav-item" data-page="account">👤 Compte</button>
-        <button class="mobile-nav-item" data-page="pact">⚡ Pacte</button>
         <button class="mobile-nav-item" data-page="send">📤 Envoyer</button>
         <button class="mobile-nav-item" data-page="receive">📥 Recevoir</button>
         <button class="mobile-nav-item" data-page="audit">📋 Audit</button>
@@ -756,9 +898,31 @@ canvas { display: block; width: 100%; cursor: crosshair; }
       </div>
     </div>
 
+
+    <!-- ── PAGE : ANNUAIRE ── -->
+    <div class="page" id="page-annuaire">
+      <!-- Demandes en attente -->
+      <div class="card" id="pending-card">
+        <div class="card-title">🔔 Demandes de pacte reçues</div>
+        <div id="pending-list">
+          <div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucune demande en attente</div>
+        </div>
+      </div>
+      <!-- Recherche utilisateurs -->
+      <div class="card">
+        <div class="card-title">🔍 Trouver un utilisateur</div>
+        <div style="display:flex;gap:8px">
+          <input class="form-input" id="search-query" placeholder="Nom ou email..." type="text" style="flex:1">
+          <button class="btn btn-primary" onclick="searchUsers()" style="flex-shrink:0">Chercher</button>
+        </div>
+        <div class="result" id="search-result" style="margin-top:8px"></div>
+        <div id="search-results" style="margin-top:12px"></div>
+      </div>
+    </div>
+
     <!-- ── PAGE : COMPTE ── -->
     <div class="page" id="page-account">
-      <div class="card" id="my-account-preview" style="display:none">
+      <div class="card">
         <div class="card-title">Mon identité</div>
         <div class="account-preview">
           <div class="account-avatar-big" id="acc-avatar">?</div>
@@ -769,56 +933,20 @@ canvas { display: block; width: 100%; cursor: crosshair; }
           </div>
         </div>
         <canvas id="sig-preview" height="70" style="border-radius:8px;background:var(--surface2);width:100%"></canvas>
-        <div class="form-label">Email du destinataire</div>
-        <input class="form-input" id="pact-email-dest" placeholder="bob@carousel.com" type="email">
-        <button class="btn btn-primary" onclick="sendPactByEmail()">📨 Envoyer le Pacte par email</button>
-        <div class="result" id="pact-email-result"></div>
       </div>
-
       <div class="card">
-        <div class="card-title">Créer / Modifier mon compte</div>
-        <div class="form-label">Nom complet</div>
-        <input class="form-input" id="acc-input-name" placeholder="Alice Dupont" type="text">
-        <div class="form-label">Email</div>
-        <input class="form-input" id="acc-input-email" placeholder="alice@carousel.com" type="email">
+        <div class="card-title">Ma signature</div>
         <div class="form-label">Dessinez votre signature</div>
         <div class="canvas-wrap">
           <canvas id="sig-canvas" height="90"></canvas>
         </div>
-        <button class="btn btn-ghost" onclick="clearSig()">↺ Effacer la signature</button>
-        <button class="btn btn-purple" onclick="createAccount()">Créer mon compte</button>
+        <button class="btn btn-ghost" onclick="clearSig()">↺ Effacer</button>
+        <button class="btn btn-purple" onclick="saveSignature()">💾 Sauvegarder la signature</button>
         <div class="result" id="acc-result"></div>
       </div>
     </div>
 
-    <!-- ── PAGE : PACTE ── -->
-    <div class="page" id="page-pact">
-      <div class="card">
-        <div class="card-title">⚡ Établir le Pacte</div>
-        <div class="form-label">Contact</div>
-        <select class="form-select" id="pact-contact"></select>
-        <div class="form-label">Nombre de clés OTP à générer</div>
-        <input class="form-input" id="pact-count" type="number" value="100" min="1" max="1000">
-        <button class="btn btn-purple" onclick="doPact()">⚡ Établir le Pacte</button>
-        <div class="result" id="pact-result"></div>
-        <div class="secret-pill" id="pact-secret"></div>
-        <button class="btn btn-ghost" id="qr-btn" style="display:none" onclick="showPactQR()">📱 Générer QR Code pour Bob</button>
-        <div class="qr-wrap" id="pact-qr">
-          <img id="pact-qr-img" src="" alt="QR Code">
-          <div class="qr-url" id="pact-qr-url"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">🔑 Entrer un Secret de Paire (côté Bob)</div>
-        <div class="form-label">Contact</div>
-        <select class="form-select" id="secret-contact"></select>
-        <div class="form-label">Secret reçu d'Alice</div>
-        <input class="form-input" id="secret-input" placeholder="a3f9b2c1...">
-        <button class="btn btn-ghost" onclick="enterSecret()">Activer le Pacte</button>
-        <div class="result" id="secret-result"></div>
-      </div>
-    </div>
+    <!-- Pacte page removed — handled in Annuaire -->
 
     <!-- ── PAGE : ENVOYER ── -->
     <div class="page" id="page-send">
@@ -877,19 +1005,17 @@ canvas { display: block; width: 100%; cursor: crosshair; }
 <script>
 'use strict';
 
-// ── UTILS ────────────────────────────────────────────────────
+// ── UTILS ─────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const get = (sel, ctx = document) => ctx.querySelector(sel);
 
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
   if (body) opts.body = JSON.stringify(body);
   try {
     const r = await fetch(path, opts);
+    if (r.status === 401) { showAuthOverlay(); return { error: 'Non authentifié' }; }
     return r.json();
-  } catch(e) {
-    return { error: e.message };
-  }
+  } catch(e) { return { error: e.message }; }
 }
 
 function showResult(id, msg, type) {
@@ -899,28 +1025,104 @@ function showResult(id, msg, type) {
   el.className = `result ${type}`;
 }
 
-// ── NAVIGATION ───────────────────────────────────────────────
+// ── AUTH ──────────────────────────────────────────────────────
+let currentUser = null;
+
+function showAuthOverlay() {
+  $('auth-overlay').style.display = 'flex';
+  $('sidebar-user').style.display = 'none';
+}
+
+function hideAuthOverlay() {
+  $('auth-overlay').style.display = 'none';
+  $('sidebar-user').style.display = 'flex';
+}
+
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='register')));
+  $('auth-login').classList.toggle('active', tab === 'login');
+  $('auth-register').classList.toggle('active', tab === 'register');
+}
+
+async function checkAuth() {
+  const user = await api('GET', '/auth/me');
+  if (user.error) { showAuthOverlay(); return false; }
+  currentUser = user;
+  hideAuthOverlay();
+  updateUserUI();
+  return true;
+}
+
+async function doLogin() {
+  const email = $('login-email').value.trim();
+  const password = $('login-password').value;
+  if (!email || !password) return showResult('login-result', '❌ Tous les champs sont requis.', 'err');
+  const r = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email, password }), credentials: 'same-origin' });
+  const d = await r.json();
+  if (d.error) return showResult('login-result', '❌ ' + d.error, 'err');
+  currentUser = d.user;
+  $('login-password').value = '';
+  hideAuthOverlay();
+  updateUserUI();
+  refresh();
+}
+
+async function doRegister() {
+  const name = $('reg-name').value.trim();
+  const email = $('reg-email').value.trim();
+  const password = $('reg-password').value;
+  if (!name || !email || !password) return showResult('reg-result', '❌ Tous les champs sont requis.', 'err');
+  const r = await fetch('/auth/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, email, password }), credentials: 'same-origin' });
+  const d = await r.json();
+  if (d.error) return showResult('reg-result', '❌ ' + d.error, 'err');
+  currentUser = d.user;
+  $('reg-password').value = '';
+  hideAuthOverlay();
+  updateUserUI();
+  refresh();
+}
+
+async function doLogout() {
+  await api('POST', '/auth/logout');
+  currentUser = null;
+  showAuthOverlay();
+}
+
+function updateUserUI() {
+  if (!currentUser) return;
+  const initial = (currentUser.name || '?').charAt(0).toUpperCase();
+  // Sidebar
+  $('sb-avatar').textContent = initial;
+  $('sb-name').textContent = currentUser.name;
+  $('sb-email').textContent = currentUser.email;
+  // Account page
+  $('acc-avatar').textContent = initial;
+  $('acc-name').textContent = currentUser.name;
+  $('acc-email').textContent = currentUser.email;
+  $('acc-device').textContent = currentUser.device_id || '—';
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────
 function initNav() {
   document.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
       const page = btn.dataset.page;
-      // Deactivate all
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('[data-page]').forEach(b => b.classList.remove('active'));
-      // Activate
       $(`page-${page}`)?.classList.add('active');
       document.querySelectorAll(`[data-page="${page}"]`).forEach(b => b.classList.add('active'));
       if (page === 'audit') refreshAudit();
       if (page === 'account') setTimeout(initCanvas, 50);
+      if (page === 'annuaire') refreshPendingRequests();
     });
   });
 }
 
-// ── DATA REFRESH ─────────────────────────────────────────────
+// ── DATA REFRESH ──────────────────────────────────────────────
 let contacts = [];
 
 async function refresh() {
-  const [status] = await Promise.all([api('GET', '/status')]);
+  const status = await api('GET', '/status');
   if (status.error) return;
 
   const keys = status.keys_available ?? 0;
@@ -937,6 +1139,7 @@ async function refresh() {
   $('pool-pct').textContent = Math.round(pct) + '%';
 
   await refreshContacts();
+  await refreshPendingCount();
 }
 
 async function refreshContacts() {
@@ -955,9 +1158,9 @@ async function refreshContacts() {
         ${c.free_keys > 20 ? '✓ OK' : c.free_keys > 0 ? '⚠ BAS' : '✗ VIDE'}
       </span>
     </div>
-  `).join('') : '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucun contact</div>';
+  `).join('') : '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucun contact — établissez un pacte via l\'Annuaire</div>';
 
-  const selects = ['pact-contact', 'send-contact', 'receive-contact', 'secret-contact'];
+  const selects = ['send-contact', 'receive-contact'];
   selects.forEach(id => {
     const sel = $(id);
     if (!sel) return;
@@ -972,7 +1175,7 @@ async function refreshContacts() {
 async function refreshAudit() {
   const logs = await api('GET', '/audit?limit=40');
   if (!Array.isArray(logs)) return;
-  const icons = { GENERATED: '🔑', USED: '✍️', DESTROYED: '🔥', VERIFY_OK: '✅', VERIFY_FAIL: '❌' };
+  const icons = { GENERATED: '🔑', USED: '✍️', DESTROYED: '🔥' };
   $('audit-list').innerHTML = logs.length ? logs.map(l => `
     <div class="audit-item ${l.action}">
       <div class="audit-icon">${icons[l.action] || '•'}</div>
@@ -986,15 +1189,104 @@ async function refreshAudit() {
   `).join('') : '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucune activité</div>';
 }
 
-// ── SIGNATURE CANVAS ─────────────────────────────────────────
-let sigDrawing = false;
-let sigData = null;
+// ── ANNUAIRE ──────────────────────────────────────────────────
+async function refreshPendingCount() {
+  const pending = await api('GET', '/pact/pending');
+  const count = Array.isArray(pending) ? pending.length : 0;
+  const badge = $('sb-notif');
+  badge.textContent = count;
+  badge.classList.toggle('visible', count > 0);
+}
+
+async function refreshPendingRequests() {
+  const pending = await api('GET', '/pact/pending');
+  const el = $('pending-list');
+  if (!Array.isArray(pending) || !pending.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucune demande en attente</div>';
+    return;
+  }
+  el.innerHTML = pending.map(r => `
+    <div class="pact-req-card">
+      <div class="user-card-avatar">${r.from_name.charAt(0).toUpperCase()}</div>
+      <div class="user-card-info">
+        <div class="user-card-name">${r.from_name}</div>
+        <div class="user-card-device">Demande de pacte reçue</div>
+      </div>
+      <div class="pact-req-actions">
+        <button class="btn-accept" onclick="acceptPact('${r.id}')">✓ Accepter</button>
+        <button class="btn-reject" onclick="rejectPact('${r.id}')">✗ Refuser</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function searchUsers() {
+  const q = $('search-query').value.trim();
+  if (!q) return;
+  showResult('search-result', '⏳ Recherche...', 'ok');
+  const results = await api('GET', `/users/search?q=${encodeURIComponent(q)}`);
+  if (results.error) return showResult('search-result', '❌ ' + results.error, 'err');
+  showResult('search-result', '', 'ok');
+  const el = $('search-results');
+  if (!results.length) { el.innerHTML = '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucun résultat</div>'; return; }
+  el.innerHTML = results.map(u => {
+    let actionBtn = '';
+    if (u.pact_status === 'accepted') {
+      actionBtn = '<span style="color:var(--green);font-size:.72rem;font-family:var(--mono)">✓ Pacte actif</span>';
+    } else if (u.pact_status === 'pending') {
+      actionBtn = '<span style="color:var(--yellow);font-size:.72rem;font-family:var(--mono)">⏳ En attente</span>';
+    } else {
+      actionBtn = `<button class="btn btn-purple" style="padding:6px 12px;font-size:.75rem" onclick="sendPactRequest('${u.id}')">⚡ Pacte</button>`;
+    }
+    return `
+      <div class="user-card">
+        <div class="user-card-avatar">${u.name.charAt(0).toUpperCase()}</div>
+        <div class="user-card-info">
+          <div class="user-card-name">${u.name}</div>
+          <div class="user-card-device">${u.device_id}</div>
+        </div>
+        ${actionBtn}
+      </div>`;
+  }).join('');
+}
+
+// Permettre recherche avec Entrée
+document.addEventListener('DOMContentLoaded', () => {
+  const sq = $('search-query');
+  if (sq) sq.addEventListener('keydown', e => { if (e.key === 'Enter') searchUsers(); });
+  const le = $('login-email');
+  const lp = $('login-password');
+  if (le) le.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  if (lp) lp.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+});
+
+async function sendPactRequest(toUserId) {
+  const r = await api('POST', '/pact/request', { to_user_id: toUserId });
+  if (r.error) return showResult('search-result', '❌ ' + r.error, 'err');
+  showResult('search-result', '✅ Demande envoyée ! L\'autre utilisateur doit l\'accepter dans l\'Annuaire.', 'ok');
+  searchUsers(); // Rafraîchir les statuts
+}
+
+async function acceptPact(requestId) {
+  const r = await api('POST', `/pact/accept/${requestId}`);
+  if (r.error) return alert('❌ ' + r.error);
+  await refresh();
+  await refreshPendingRequests();
+  showResult('search-result', '✅ ' + (r.message || 'Pacte établi !'), 'ok');
+}
+
+async function rejectPact(requestId) {
+  await api('POST', `/pact/reject/${requestId}`);
+  await refreshPendingRequests();
+  await refreshPendingCount();
+}
+
+// ── SIGNATURE CANVAS ──────────────────────────────────────────
+let sigDrawing = false, sigData = null;
 
 function initCanvas() {
   const canvas = $('sig-canvas');
   if (!canvas) return;
-  
-  // Attendre que le canvas soit visible
   setTimeout(() => {
     canvas.width = canvas.offsetWidth || 300;
     canvas.height = 90;
@@ -1003,14 +1295,12 @@ function initCanvas() {
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
     const pos = e => {
       const r = canvas.getBoundingClientRect();
       const cx = e.touches ? e.touches[0].clientX : e.clientX;
       const cy = e.touches ? e.touches[0].clientY : e.clientY;
       return { x: cx - r.left, y: cy - r.top };
     };
-
     canvas.addEventListener('mousedown', e => { sigDrawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
     canvas.addEventListener('mousemove', e => { if (!sigDrawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
     canvas.addEventListener('mouseup', () => { sigDrawing = false; sigData = canvas.toDataURL(); });
@@ -1020,6 +1310,7 @@ function initCanvas() {
     canvas.addEventListener('touchend', () => { sigDrawing = false; sigData = canvas.toDataURL(); });
   }, 100);
 }
+
 function clearSig() {
   const canvas = $('sig-canvas');
   const ctx = canvas.getContext('2d');
@@ -1027,116 +1318,13 @@ function clearSig() {
   sigData = null;
 }
 
-// ── ACCOUNT ──────────────────────────────────────────────────
-let myAccount = null;
-try { myAccount = JSON.parse(localStorage.getItem('enclave_account')); } catch(e) {}
-
-function loadAccountUI() {
-  if (!myAccount) return;
-  $('my-account-preview').style.display = 'block';
-  $('acc-avatar').textContent = myAccount.name.charAt(0).toUpperCase();
-  $('acc-name').textContent = myAccount.name;
-  $('acc-email').textContent = myAccount.email;
-  $('acc-device').textContent = myAccount.device_id;
-  $('acc-input-name').value = myAccount.name;
-  $('acc-input-email').value = myAccount.email;
-
-  if (myAccount.signature) {
-    const canvas = $('sig-preview');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-    img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    };
-    img.src = myAccount.signature;
-  }
+function saveSignature() {
+  if (!sigData) return showResult('acc-result', '❌ Dessinez d\'abord votre signature', 'err');
+  localStorage.setItem('enclave_signature', sigData);
+  showResult('acc-result', '✅ Signature sauvegardée', 'ok');
 }
 
-async function createAccount() {
-  const name = $('acc-input-name').value.trim();
-  const email = $('acc-input-email').value.trim();
-  if (!name || !email) return showResult('acc-result', '❌ Nom et email requis', 'err');
-
-  const status = await api('GET', '/status');
-  myAccount = { name, email, device_id: status.device_id, signature: sigData || '', created_at: Date.now() };
-  localStorage.setItem('enclave_account', JSON.stringify(myAccount));
-  loadAccountUI();
-  showResult('acc-result', `✅ Compte créé pour ${name} !`, 'ok');
-}
-
-async function sendPactByEmail() {
-  if (!myAccount) return showResult('pact-email-result', '❌ Créez d\'abord un compte', 'err');
-  const dest = $('pact-email-dest').value.trim();
-  if (!dest) return showResult('pact-email-result', '❌ Email destinataire requis', 'err');
-
-  showResult('pact-email-result', '⏳ Génération du pacte...', 'ok');
-
-  const contactId = 'contact-' + myAccount.email.replace(/[@.]/g, '_');
-  const r = await api('POST', '/generate', { contact_id: contactId, count: 100 });
-  if (r.error) return showResult('pact-email-result', '❌ ' + r.error, 'err');
-
-  const statusData = await api('GET', '/status');
-  const baseUrl = statusData.public_url || window.location.origin;
-  const identity = encodeURIComponent(JSON.stringify({
-    name: myAccount.name,
-    email: myAccount.email,
-    device_id: myAccount.device_id,
-    secret: r.pair_secret
-  }));
-  const meetUrl = `${baseUrl}/meet?identity=${identity}`;
-
-  const emailRes = await api('POST', '/send-pact-email', {
-    to: dest,
-    from_name: myAccount.name,
-    meet_url: meetUrl
-  });
-
-  if (emailRes.success) {
-    showResult('pact-email-result', `✅ Pacte envoyé à ${dest} !`, 'ok');
-    $('pact-email-dest').value = '';
-  } else {
-    showResult('pact-email-result', '❌ ' + (emailRes.error || 'Erreur envoi email'), 'err');
-  }
-  await refresh();
-}
-
-// ── PACTE ────────────────────────────────────────────────────
-async function doPact() {
-  const contact_id = $('pact-contact').value;
-  const count = parseInt($('pact-count').value) || 100;
-  const r = await api('POST', '/generate', { contact_id, count });
-  if (r.error) return showResult('pact-result', '❌ ' + r.error, 'err');
-
-  showResult('pact-result', `✅ ${r.message}`, 'ok');
-  if (r.pair_secret) {
-    $('pact-secret').textContent = `🔑 Secret de paire : ${r.pair_secret}`;
-    $('pact-secret').style.display = 'block';
-    $('qr-btn').style.display = 'flex';
-  }
-  await refresh();
-}
-
-async function showPactQR() {
-  const contact_id = $('pact-contact').value;
-  const r = await api('GET', `/qrcode/${contact_id}`);
-  if (r.error) return alert(r.error);
-  $('pact-qr-img').src = r.qr;
-  $('pact-qr-url').textContent = r.url;
-  $('pact-qr').style.display = 'block';
-}
-
-async function enterSecret() {
-  const contact_id = $('secret-contact').value;
-  const secret = $('secret-input').value.trim();
-  if (!secret) return showResult('secret-result', '❌ Secret requis', 'err');
-  const r = await api('POST', '/accept-pact', { contact_id, secret });
-  if (r.error) return showResult('secret-result', '❌ ' + r.error, 'err');
-  showResult('secret-result', '✅ Secret activé ! Vous pouvez recevoir les messages.', 'ok');
-  await refresh();
-}
-
-// ── FILE ─────────────────────────────────────────────────────
+// ── SEND ──────────────────────────────────────────────────────
 function onFileSelect(input) {
   const file = input.files[0];
   if (!file) return;
@@ -1145,7 +1333,6 @@ function onFileSelect(input) {
   $('attach-toggle').style.display = 'flex';
 }
 
-// ── SEND ─────────────────────────────────────────────────────
 async function doSend() {
   const contact_id = $('send-contact').value;
   const subject = $('send-subject').value.trim();
@@ -1171,16 +1358,12 @@ async function doSend() {
 
   $('receive-key-id').value = r.key_id;
   $('receive-contact').value = contact_id;
-
-  showResult('send-result',
-    `✅ Message signé & déposé sur NextCloud\n\nkey_id : ${r.key_id}${r.file_uploaded ? '\n📎 Pièce jointe incluse et uploadée' : ''}`,
-    'ok'
-  );
+  showResult('send-result', `✅ Message signé & déposé\n\nkey_id : ${r.key_id}${r.file_uploaded ? '\n📎 Pièce jointe incluse' : ''}`, 'ok');
   $('send-pfs').style.display = 'block';
   await refresh();
 }
 
-// ── RECEIVE ──────────────────────────────────────────────────
+// ── RECEIVE ───────────────────────────────────────────────────
 async function doReceive() {
   const contact_id = $('receive-contact').value;
   const key_id = $('receive-key-id').value.trim();
@@ -1190,33 +1373,38 @@ async function doReceive() {
   const r = await api('POST', '/receive', { contact_id, key_id });
   if (r.error) return showResult('receive-result', '❌ ' + r.error, 'err');
 
-  if (r.valid) {
-    showResult('receive-result',
-      `✅ SIGNATURE VALIDE — Message authentifié\n\nSujet : ${r.subject}\nMessage : ${r.body}${r.file_name ? '\n\n📎 Pièce jointe : ' + r.file_name + ' (téléchargement automatique)' : ''}\n\n${r.pfs}`,
-      'ok'
-    );
-    $('receive-pfs').style.display = 'block';
-    if (r.file_data && r.file_name) {
-      const a = document.createElement('a');
-      a.href = `data:application/octet-stream;base64,${r.file_data}`;
-      a.download = r.file_name;
-      a.click();
-    }
-  } else {
-    showResult('receive-result', '❌ SIGNATURE INVALIDE\nMessage altéré ou clé déjà consommée — accès refusé.', 'err');
+  showResult('receive-result',
+    `✅ SIGNATURE VALIDE\n\nSujet : ${r.subject}\nMessage : ${r.body}${r.file_name ? '\n\n📎 Pièce jointe : ' + r.file_name : ''}\n\n${r.pfs}`,
+    'ok'
+  );
+  $('receive-pfs').style.display = 'block';
+  if (r.file_data && r.file_name) {
+    const a = document.createElement('a');
+    a.href = `data:application/octet-stream;base64,${r.file_data}`;
+    a.download = r.file_name;
+    a.click();
   }
   await refresh();
 }
 
-// ── INIT ─────────────────────────────────────────────────────
-initNav();
-initCanvas();
-loadAccountUI();
-refresh();
-setInterval(() => {
-  refresh();
-  if (document.querySelector('.page.active')?.id === 'page-audit') refreshAudit();
-}, 8000);
+// ── INIT ──────────────────────────────────────────────────────
+async function init() {
+  initNav();
+  const authenticated = await checkAuth();
+  if (authenticated) {
+    refresh();
+    initCanvas();
+  }
+  setInterval(async () => {
+    if (currentUser) {
+      refresh();
+      if (document.querySelector('.page.active')?.id === 'page-audit') refreshAudit();
+      if (document.querySelector('.page.active')?.id === 'page-annuaire') refreshPendingRequests();
+    }
+  }, 8000);
+}
+
+init();
 </script>
 </body>
 </html>

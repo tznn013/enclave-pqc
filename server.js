@@ -1,428 +1,342 @@
 require("dotenv").config();
-const crypto = require("crypto");
+const crypto  = require("crypto");
 const express = require("express");
-const path = require("path");
-const QRCode = require("qrcode");
-const helmet = require("helmet");
+const path    = require("path");
+const QRCode  = require("qrcode");
+const helmet  = require("helmet");
 const rateLimit = require("express-rate-limit");
-const nodemailer = require("nodemailer");
+const cookieParser = require("cookie-parser");
+const jwt     = require("jsonwebtoken");
+const bcrypt  = require("bcryptjs");
 
 const { sign, verify, decryptPayload } = require("./crypto");
-const { generateKeyPool, consumeKey, findAndConsumeKey,
-        countAllFreeKeys, getAuditLog, getContacts, getDeviceId,
-        setSharedSecret, getSharedSecret } = require("./keyStore");
+const { generateKeyPool, consumeKey, findAndConsumeKey, countAllFreeKeys, getAuditLog, getContacts, getDeviceId, setSharedSecret, getSharedSecret } = require("./keyStore");
+const { depositMessage, retrieveMessage, deleteMessage, depositFile, retrieveFile, deleteFile } = require("./nextcloud");
+
+// Variables requises
+["JWT_SECRET","NEXTCLOUD_USER","NEXTCLOUD_PASS","NEXTCLOUD_URL"].forEach(v => {
+  if (!process.env[v]) { console.error(`Manquant: ${v}`); process.exit(1); }
+});
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const app = express();
 
-// ─── OWNER_ID ────────────────────────────────────────────────────
-// FIX: Lève une erreur au démarrage si la variable n'est pas définie
-// plutôt que d'utiliser silencieusement un fallback partagé "admin-esiee".
-if (!process.env.NEXTCLOUD_USER) {
-  console.error("❌ NEXTCLOUD_USER non défini dans .env — arrêt.");
-  process.exit(1);
-}
-const OWNER_ID = process.env.NEXTCLOUD_USER;
-
-// ─── SÉCURITÉ HTTP ───────────────────────────────────────────────
-// FIX: Headers de sécurité (CSP, HSTS, X-Frame-Options, X-Content-Type-Options…)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'","'unsafe-inline'"],
       scriptSrcAttr: ["'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:"],
+      styleSrc: ["'self'","'unsafe-inline'","https://fonts.googleapis.com"],
+      fontSrc: ["'self'","https://fonts.gstatic.com"],
+      imgSrc: ["'self'","data:"],
     }
   }
 }));
 
-// ─── RATE LIMITING ───────────────────────────────────────────────
-// FIX: Empêche l'épuisement du pool de clés et le brute-force sur contact_id.
-const defaultLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Trop de requêtes, réessayez dans 15 minutes." }
-});
-
-const sensitiveLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Trop de requêtes, réessayez dans 15 minutes." }
-});
+const mkLimit = (max) => rateLimit({ windowMs: 15*60*1000, max, standardHeaders: true, legacyHeaders: false, message: { error: "Trop de requêtes." } });
+const authLimiter      = mkLimit(10);
+const sensitiveLimiter = mkLimit(30);
+const defaultLimiter   = mkLimit(200);
 
 app.use(defaultLimiter);
-
+app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─── HELPER : échapper les caractères HTML ───────────────────────
-// FIX: Utilisé pour toutes les variables injectées dans du HTML généré (anti-XSS).
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;");
+// Helpers
+const escapeHtml = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#x27;");
+const isValidEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+
+// Auth
+function authRequired(req, res, next) {
+  const token = req.cookies?.enclave_token;
+  if (!token) return res.status(401).json({ error: "Non authentifié" });
+  try { req.user = jwt.verify(token, JWT_SECRET); next(); }
+  catch { res.clearCookie("enclave_token"); return res.status(401).json({ error: "Session expirée" }); }
 }
 
-// ─── STATUS ──────────────────────────────────────────────────────
-app.get("/status", async (req, res) => {
-  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
-  const public_url = domain ? `https://${domain}` : null;
-  res.json({
-    running: true,
-    owner: OWNER_ID,
-    device_id: await getDeviceId(),
-    keys_available: await countAllFreeKeys(),
-    version: "2.0.0-pqc",
-    pqc_resistant: true,
-    confidentiality: "OTP-XOR end-to-end",
-    public_url  // null en local, URL Railway en prod
-  });
+function issueToken(res, user) {
+  const payload = { id: user.id, email: user.email, name: user.name };
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
+  res.cookie("enclave_token", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", maxAge: 86400000 });
+  return payload;
+}
+
+// POST /auth/register
+app.post("/auth/register", authLimiter, async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) return res.status(400).json({ error: "Tous les champs sont requis." });
+  if (String(name).trim().length < 2) return res.status(400).json({ error: "Nom trop court." });
+  if (!isValidEmail(email)) return res.status(400).json({ error: "Email invalide." });
+  if (String(password).length < 8) return res.status(400).json({ error: "Mot de passe trop court (8 caractères min)." });
+  try {
+    const db = await require("./db").getDb();
+    const stmt = db.prepare("SELECT id FROM users WHERE email=?");
+    const ex = stmt.getAsObject({ 1: email.toLowerCase() });
+    stmt.free();
+    if (ex.id) return res.status(409).json({ error: "Cet email est déjà utilisé." });
+    const id = "user-" + crypto.randomBytes(8).toString("hex");
+    const device_id = "dev-" + crypto.randomBytes(4).toString("hex");
+    const hash = await bcrypt.hash(password, 12);
+    db.run("INSERT INTO users (id,email,password_hash,name,device_id) VALUES (?,?,?,?,?)", [id, email.toLowerCase(), hash, name.trim(), device_id]);
+    require("./db").save();
+    const user = { id, email: email.toLowerCase(), name: name.trim(), device_id };
+    res.status(201).json({ user: issueToken(res, user) });
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
 });
 
-// ─── CONTACTS (FILTRÉS) ──────────────────────────────────────────
-app.get("/contacts", async (req, res) => {
+// POST /auth/login
+app.post("/auth/login", authLimiter, async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: "Email et mot de passe requis." });
+  try {
+    const db = await require("./db").getDb();
+    const stmt = db.prepare("SELECT id,email,password_hash,name,device_id FROM users WHERE email=?");
+    const user = stmt.getAsObject({ 1: email.toLowerCase() });
+    stmt.free();
+    const fake = "$2a$12$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const valid = await bcrypt.compare(password, user.password_hash || fake);
+    if (!user.id || !valid) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
+    res.json({ user: issueToken(res, user) });
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+});
+
+// POST /auth/logout
+app.post("/auth/logout", (req, res) => {
+  res.clearCookie("enclave_token");
+  res.json({ success: true });
+});
+
+// GET /auth/me
+app.get("/auth/me", authRequired, async (req, res) => {
+  try {
+    const db = await require("./db").getDb();
+    const stmt = db.prepare("SELECT id,email,name,device_id FROM users WHERE id=?");
+    const user = stmt.getAsObject({ 1: req.user.id });
+    stmt.free();
+    if (!user.id) return res.status(404).json({ error: "Introuvable." });
+    res.json(user);
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+});
+
+// GET /users/search
+app.get("/users/search", authRequired, async (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (q.length < 2) return res.status(400).json({ error: "2 caractères minimum." });
+  try {
+    const db = await require("./db").getDb();
+    const stmt = db.prepare("SELECT id,name,device_id FROM users WHERE (name LIKE ? OR email LIKE ?) AND id != ? LIMIT 20");
+    const results = [];
+    const p = `%${q}%`;
+    stmt.bind({ 1: p, 2: p, 3: req.user.id });
+    while (stmt.step()) results.push(stmt.getAsObject());
+    stmt.free();
+    const enriched = await Promise.all(results.map(async u => {
+      const s = db.prepare("SELECT id,status FROM pact_requests WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at DESC LIMIT 1");
+      const ex = s.getAsObject({ 1: req.user.id, 2: u.id, 3: u.id, 4: req.user.id });
+      s.free();
+      return { ...u, pact_status: ex.status || null, pact_request_id: ex.id || null };
+    }));
+    res.json(enriched);
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+});
+
+// POST /pact/request
+app.post("/pact/request", sensitiveLimiter, authRequired, async (req, res) => {
+  const { to_user_id } = req.body;
+  if (!to_user_id) return res.status(400).json({ error: "to_user_id requis." });
+  if (to_user_id === req.user.id) return res.status(400).json({ error: "Vous ne pouvez pas vous envoyer un pacte." });
+  try {
+    const db = await require("./db").getDb();
+    const us = db.prepare("SELECT id FROM users WHERE id=?");
+    const target = us.getAsObject({ 1: to_user_id });
+    us.free();
+    if (!target.id) return res.status(404).json({ error: "Utilisateur introuvable." });
+    const ps = db.prepare("SELECT id,status FROM pact_requests WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at DESC LIMIT 1");
+    const ex = ps.getAsObject({ 1: req.user.id, 2: to_user_id, 3: to_user_id, 4: req.user.id });
+    ps.free();
+    if (ex.status === 'accepted') return res.status(409).json({ error: "Pacte déjà actif." });
+    if (ex.status === 'pending') return res.status(409).json({ error: "Demande déjà en attente." });
+    const id = "req-" + crypto.randomBytes(8).toString("hex");
+    db.run("INSERT INTO pact_requests (id,from_user_id,to_user_id) VALUES (?,?,?)", [id, req.user.id, to_user_id]);
+    require("./db").save();
+    res.status(201).json({ success: true });
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+});
+
+// GET /pact/pending
+app.get("/pact/pending", authRequired, async (req, res) => {
+  try {
+    const db = await require("./db").getDb();
+    const stmt = db.prepare("SELECT pr.id,pr.from_user_id,pr.created_at,u.name as from_name FROM pact_requests pr JOIN users u ON u.id=pr.from_user_id WHERE pr.to_user_id=? AND pr.status='pending' ORDER BY pr.created_at DESC");
+    const rows = [];
+    stmt.bind({ 1: req.user.id });
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+});
+
+// POST /pact/accept/:id
+app.post("/pact/accept/:id", sensitiveLimiter, authRequired, async (req, res) => {
+  try {
+    const db = await require("./db").getDb();
+    const rs = db.prepare("SELECT id,from_user_id,to_user_id,status FROM pact_requests WHERE id=? AND to_user_id=?");
+    const req2 = rs.getAsObject({ 1: req.params.id, 2: req.user.id });
+    rs.free();
+    if (!req2.id) return res.status(404).json({ error: "Demande introuvable." });
+    if (req2.status !== 'pending') return res.status(400).json({ error: "Demande non en attente." });
+
+    const u1s = db.prepare("SELECT id,name,device_id FROM users WHERE id=?");
+    const uFrom = u1s.getAsObject({ 1: req2.from_user_id }); u1s.free();
+    const u2s = db.prepare("SELECT id,name,device_id FROM users WHERE id=?");
+    const uTo = u2s.getAsObject({ 1: req2.to_user_id }); u2s.free();
+
+    const pairSecret = crypto.randomBytes(32).toString("hex");
+    const cid1 = `contact-${uFrom.id}-${uTo.id}`;
+    const cid2 = `contact-${uTo.id}-${uFrom.id}`;
+
+    db.run("INSERT OR REPLACE INTO contacts (id,owner_id,name,device_id,shared_secret) VALUES (?,?,?,?,?)", [cid1, uFrom.id, uTo.name, uTo.device_id, pairSecret]);
+    db.run("INSERT OR REPLACE INTO contacts (id,owner_id,name,device_id,shared_secret) VALUES (?,?,?,?,?)", [cid2, uTo.id, uFrom.name, uFrom.device_id, pairSecret]);
+    db.run("UPDATE pact_requests SET status='accepted' WHERE id=?", [req.params.id]);
+    require("./db").save();
+
+    await generateKeyPool(cid1, 100);
+    await generateKeyPool(cid2, 100);
+
+    res.json({ success: true, message: "Canal chiffré établi — 200 clés générées." });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /pact/reject/:id
+app.post("/pact/reject/:id", authRequired, async (req, res) => {
+  try {
+    const db = await require("./db").getDb();
+    const s = db.prepare("SELECT id FROM pact_requests WHERE id=? AND to_user_id=? AND status='pending'");
+    const r = s.getAsObject({ 1: req.params.id, 2: req.user.id }); s.free();
+    if (!r.id) return res.status(404).json({ error: "Introuvable." });
+    db.run("UPDATE pact_requests SET status='rejected' WHERE id=?", [req.params.id]);
+    require("./db").save();
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: "Erreur serveur." }); }
+});
+
+// GET /status
+app.get("/status", authRequired, async (req, res) => {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  res.json({ running: true, device_id: await getDeviceId(), keys_available: await countAllFreeKeys(), version: "3.0.0", public_url: domain ? `https://${domain}` : null });
+});
+
+// GET /contacts
+app.get("/contacts", authRequired, async (req, res) => {
   try {
     const all = await getContacts();
-    const mine = all.filter(c => c.owner_id === OWNER_ID);
-    res.json(mine);
-  } catch (e) {
-    res.json([]);
-  }
+    res.json(all.filter(c => c.owner_id === req.user.id));
+  } catch(e) { res.json([]); }
 });
 
-// ─── AUDIT ───────────────────────────────────────────────────────
-// FIX: Protégé par une clé admin (header x-admin-key).
-// Définir ADMIN_KEY dans .env pour activer la protection.
-app.get("/audit", async (req, res) => {
+// GET /audit
+app.get("/audit", authRequired, async (req, res) => {
   const adminKey = process.env.ADMIN_KEY;
-  if (adminKey && req.headers["x-admin-key"] !== adminKey) {
-    return res.status(401).json({ error: "Non autorisé." });
-  }
+  if (adminKey && req.headers["x-admin-key"] !== adminKey) return res.status(401).json({ error: "Non autorisé." });
   res.json(await getAuditLog(parseInt(req.query.limit) || 50));
 });
 
-// ─── LE PACTE ────────────────────────────────────────────────────
-app.post("/generate", sensitiveLimiter, async (req, res) => {
-  const { contact_id, count = 50 } = req.body;
-  if (!contact_id) return res.status(400).json({ error: "contact_id requis" });
-  try {
-    const pairSecret = crypto.randomBytes(32).toString("hex");
-    await setSharedSecret(contact_id, pairSecret);
-    const ids = await generateKeyPool(contact_id, count);
-    res.json({
-      success: true,
-      generated: ids.length,
-      pair_secret: pairSecret,
-      message: `${ids.length} clés OTP générées. Secret de paire établi.`
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── SEND PACT EMAIL ─────────────────────────────────────────────
-// Envoie le QR de pacte directement par email — le QR ne s'affiche
-// jamais à l'écran, seul le destinataire légitime peut scanner.
-app.post("/send-pact-email", sensitiveLimiter, async (req, res) => {
-  const { to, from_name, meet_url } = req.body;
-  if (!to || !from_name || !meet_url) {
-    return res.status(400).json({ error: "to, from_name et meet_url requis" });
-  }
-
-  // Vérification basique de l'email
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    return res.status(400).json({ error: "Email destinataire invalide" });
-  }
-
-  try {
-    // Génère le QR en PNG base64
-    const qrBuffer = await QRCode.toBuffer(meet_url, { width: 300, margin: 2 });
-
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
-
-    await transporter.sendMail({
-      from: `"Enclave PQC" <${process.env.SMTP_USER}>`,
-      to,
-      subject: `🔐 Pacte de chiffrement — ${from_name}`,
-      text: `${from_name} vous invite à établir un canal chiffré OTP via Enclave PQC.\n\nScannez le QR code en pièce jointe pour accepter le pacte.\n\nCe lien est unique et à usage unique.`,
-      html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:auto;background:#0b0f1a;color:#e2eeff;padding:32px;border-radius:16px;">
-          <h2 style="color:#00e5ff;margin-bottom:8px;">🔐 Enclave PQC</h2>
-          <p style="color:#8ba3c7;margin-bottom:24px;">Canal chiffré One-Time Pad</p>
-          <p><strong>${from_name}</strong> vous invite à établir un canal de communication chiffré.</p>
-          <p style="margin:16px 0;color:#8ba3c7;">Scannez le QR code ci-dessous pour accepter le pacte. Ce lien est <strong>unique et secret</strong> — ne le partagez pas.</p>
-          <div style="text-align:center;margin:24px 0;">
-            <img src="cid:pact-qr" alt="QR Code Pacte" style="border-radius:12px;width:220px;height:220px;">
-          </div>
-          <p style="font-size:12px;color:#3d5470;margin-top:24px;">Enclave PQC-OTP — Chiffrement bout-en-bout garanti</p>
-        </div>`,
-      attachments: [{
-        filename: 'pacte-enclave.png',
-        content: qrBuffer,
-        cid: 'pact-qr'   // référencé dans le HTML via cid:
-      }]
-    });
-
-    res.json({ success: true });
-  } catch (e) {
-    console.error("Email error:", e.message);
-    res.status(500).json({ error: "Échec envoi email : " + e.message });
-  }
-});
-
-// ─── NEXTCLOUD ───────────────────────────────────────────────────
-const {
-  depositMessage, retrieveMessage, deleteMessage,
-  ensureFolder, depositFile, retrieveFile, deleteFile
-} = require("./nextcloud");
-
-// ─── SEND ────────────────────────────────────────────────────────
-app.post("/send", sensitiveLimiter, async (req, res) => {
+// POST /send
+app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
   const { subject, body, contact_id, file_data, file_name } = req.body;
-  if (!subject || !body || !contact_id) {
-    return res.status(400).json({ error: "subject, body et contact_id requis" });
-  }
+  if (!subject || !body || !contact_id) return res.status(400).json({ error: "Champs manquants." });
+  try {
+    const db = await require("./db").getDb();
+    const cs = db.prepare("SELECT id FROM contacts WHERE id=? AND owner_id=?");
+    const ct = cs.getAsObject({ 1: contact_id, 2: req.user.id }); cs.free();
+    if (!ct.id) return res.status(403).json({ error: "Contact non autorisé." });
+  } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
 
   const pairSecret = await getSharedSecret(contact_id);
-  if (!pairSecret) return res.status(400).json({ error: "Aucun secret de paire." });
-
+  if (!pairSecret) return res.status(400).json({ error: "Aucun secret." });
   const keyData = await consumeKey(contact_id);
   if (!keyData) return res.status(400).json({ error: "Plus de clés disponibles." });
 
   try {
-    let finalBody = body;
-    let fileUploaded = false;
-
+    let finalBody = body, fileUploaded = false;
     if (file_data && file_name) {
-      const fileBuffer = Buffer.from(file_data, "base64");
-      await depositFile(keyData.id, fileBuffer, file_name);
+      await depositFile(keyData.id, Buffer.from(file_data, "base64"), file_name);
       finalBody += `\n\n[PJ: ${file_name}]`;
       fileUploaded = true;
     }
-
     const result = sign(subject, finalBody, pairSecret, keyData.keyBlob);
-
-    const payload = {
-      v: 3,
-      key_id: keyData.id,
-      device_id: await getDeviceId(),
-      encrypted_subject: result.encrypted_subject,
-      subject_len: result.subject_len,
-      encrypted_body: result.encrypted_body,
-      body_len: result.body_len,
-      ciphertext_b64: result.ciphertext_b64,
-      file_name: fileUploaded ? file_name : null,
-      sent_at: Date.now()
-    };
-
+    const payload = { v: 3, key_id: keyData.id, device_id: await getDeviceId(), from_user_id: req.user.id, encrypted_subject: result.encrypted_subject, subject_len: result.subject_len, encrypted_body: result.encrypted_body, body_len: result.body_len, ciphertext_b64: result.ciphertext_b64, file_name: fileUploaded ? file_name : null, sent_at: Date.now() };
     await depositMessage(keyData.id, payload);
-    res.json({
-      success: true,
-      key_id: keyData.id,
-      file_uploaded: fileUploaded,
-      message: `Message chiffré & déposé sur NextCloud.`,
-      confidentiality: "✅ Chiffré par XOR OTP"
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    res.json({ success: true, key_id: keyData.id, file_uploaded: fileUploaded, message: "Message chiffré & déposé." });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── RECEIVE ─────────────────────────────────────────────────────
-app.post("/receive", sensitiveLimiter, async (req, res) => {
+// POST /receive
+app.post("/receive", sensitiveLimiter, authRequired, async (req, res) => {
   const { key_id, contact_id } = req.body;
-  if (!key_id || !contact_id) return res.status(400).json({ error: "Champs manquants" });
+  if (!key_id || !contact_id) return res.status(400).json({ error: "Champs manquants." });
+  try {
+    const db = await require("./db").getDb();
+    const cs = db.prepare("SELECT id FROM contacts WHERE id=? AND owner_id=?");
+    const ct = cs.getAsObject({ 1: contact_id, 2: req.user.id }); cs.free();
+    if (!ct.id) return res.status(403).json({ error: "Contact non autorisé." });
+  } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
 
   try {
     const payload = await retrieveMessage(key_id);
     if (!payload) return res.status(404).json({ error: "Message introuvable." });
-
     const pairSecret = await getSharedSecret(contact_id);
     const keyData = await findAndConsumeKey(key_id, contact_id);
     if (!keyData) return res.status(400).json({ error: "Clé déjà détruite." });
-
     const { subject, body } = decryptPayload(payload, keyData.keyBlob);
     const ok = verify(subject, body, pairSecret, keyData.keyBlob, payload.ciphertext_b64);
-
-    // FIX: Si la signature est invalide, on rejette sans dévoiler le contenu déchiffré.
-    // La clé est déjà détruite (PFS garanti), on nettoie NextCloud proprement.
     if (!ok) {
       await deleteMessage(key_id);
       if (payload.file_name) await deleteFile(key_id, payload.file_name).catch(() => {});
       return res.status(400).json({ error: "Signature invalide — message rejeté." });
     }
-
     let fileData = null;
     if (payload.file_name) {
-      const fileBuffer = await retrieveFile(key_id, payload.file_name);
-      if (fileBuffer) {
-        fileData = fileBuffer.toString("base64");
-        await deleteFile(key_id, payload.file_name);
-      }
+      const fb = await retrieveFile(key_id, payload.file_name);
+      if (fb) { fileData = fb.toString("base64"); await deleteFile(key_id, payload.file_name); }
     }
-
     await deleteMessage(key_id);
-
-    res.json({
-      valid: true,
-      subject,
-      body,
-      file_name: payload.file_name,
-      file_data: fileData,
-      sent_at: payload.sent_at,
-      pfs: "Clé détruite + message supprimé de NextCloud."
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    res.json({ valid: true, subject, body, file_name: payload.file_name, file_data: fileData, sent_at: payload.sent_at, pfs: "Clé détruite + message supprimé." });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── QR CODES ────────────────────────────────────────────────────
-app.get("/qrcode/:contact_id", async (req, res) => {
-  const contact_id = req.params.contact_id;
+// GET /qrcode/:contact_id
+app.get("/qrcode/:contact_id", authRequired, async (req, res) => {
   try {
-    const secret = await getSharedSecret(contact_id);
-    if (!secret) return res.status(400).json({ error: "Faites d'abord le Pacte" });
-
+    const secret = await getSharedSecret(req.params.contact_id);
+    if (!secret) return res.status(400).json({ error: "Aucun secret." });
     const domain = process.env.RAILWAY_PUBLIC_DOMAIN || "localhost:8080";
-    const pactUrl = `https://${domain}/import-pact?contact_id=${encodeURIComponent(contact_id)}&secret=${encodeURIComponent(secret)}&from=${encodeURIComponent(await getDeviceId())}`;
-    const qrDataUrl = await QRCode.toDataURL(pactUrl, { width: 300 });
-    res.json({ qr: qrDataUrl, url: pactUrl });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    const url = `https://${domain}/import-pact?contact_id=${encodeURIComponent(req.params.contact_id)}&secret=${encodeURIComponent(secret)}&from=${encodeURIComponent(await getDeviceId())}`;
+    res.json({ qr: await QRCode.toDataURL(url, { width: 300 }), url });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/qrcode-identity", async (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).json({ error: "url requis" });
-  try {
-    const qrDataUrl = await QRCode.toDataURL(decodeURIComponent(url), { width: 300 });
-    res.json({ qr: qrDataUrl });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── PAGES HTML ──────────────────────────────────────────────────
+// Pages publiques
 app.get("/import-pact", async (req, res) => {
   const { contact_id, secret, from } = req.query;
-
-  // FIX XSS : escapeHtml() pour le contenu dans le DOM, JSON.stringify() pour
-  // les valeurs dans le bloc <script>. JSON.stringify ajoute les guillemets
-  // et échappe automatiquement les caractères dangereux (\, ", <, >, &).
-  const safeFrom      = escapeHtml(from || "inconnu");
-  const safeContactJs = JSON.stringify(contact_id || "");
-  const safeSecretJs  = JSON.stringify(secret || "");
-
-  res.send(`<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Enclave</title>
-<style>
-body{background:#060910;color:#e2eeff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
-.card{background:#0b0f1a;border:1px solid #1c2840;border-radius:16px;padding:28px;max-width:400px;width:100%;text-align:center;}
-h1{color:#00e5ff;font-size:1.2rem;margin-bottom:20px;}
-button{background:#00e5ff;color:#000;border:none;border-radius:10px;padding:14px;font-weight:700;cursor:pointer;width:100%;}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>🔐 ENCLAVE PQC</h1>
-  <p>Pacte de <strong>${safeFrom}</strong></p>
-  <button onclick="importPact()">Accepter le Pacte</button>
-  <div id="ok" style="display:none;color:#00e676;margin-top:15px;">✅ Pacte établi !</div>
-</div>
-<script>
-async function importPact() {
-  const r = await fetch('/accept-pact', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contact_id: ${safeContactJs}, secret: ${safeSecretJs} })
-  });
-  const d = await r.json();
-  if (d.success) document.getElementById('ok').style.display = 'block';
-}
-</script>
-</body></html>`);
-});
-
-app.get("/meet", async (req, res) => {
-  const { identity } = req.query;
-  if (!identity) return res.status(400).send("Lien invalide");
-
-  // FIX: try/catch — une URL malformée ne doit pas crasher le serveur Node.
-  let data;
-  try {
-    data = JSON.parse(decodeURIComponent(identity));
-    if (!data.email || !data.name || !data.device_id || !data.secret) {
-      return res.status(400).send("Données d'identité incomplètes.");
-    }
-  } catch (e) {
-    return res.status(400).send("Données d'identité invalides.");
-  }
-
-  const db = await require("./db").getDb();
-  const contactId = 'contact-' + data.email.replace(/[@.]/g, '_');
-
-  db.run("INSERT OR IGNORE INTO contacts (id,owner_id,name,device_id) VALUES (?,?,?,?)",
-    [contactId, OWNER_ID, data.name, data.device_id]);
-
-  await setSharedSecret(contactId, data.secret);
-  require("./db").save();
-
-  res.send(`<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Enclave</title>
-<style>
-body{background:#060910;color:#e2eeff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}
-.card{background:#0b0f1a;border:1px solid #1c2840;border-radius:16px;padding:30px;text-align:center;}
-button{background:#00e5ff;padding:12px;border:none;border-radius:8px;cursor:pointer;font-weight:bold;}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>✅ Contact ajouté</h1>
-  <p>Le répertoire de <strong>${escapeHtml(OWNER_ID)}</strong> a été mis à jour.</p>
-  <button onclick="window.location='/'">Retourner à l'Enclave</button>
-</div>
-</body></html>`);
+  const sf = escapeHtml(from || "inconnu");
+  const sc = JSON.stringify(contact_id || "");
+  const ss = JSON.stringify(secret || "");
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Enclave</title><style>body{background:#060910;color:#e2eeff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}.card{background:#0b0f1a;border:1px solid #1c2840;border-radius:16px;padding:28px;max-width:400px;width:100%;text-align:center;}h1{color:#00e5ff;}button{background:#00e5ff;color:#000;border:none;border-radius:10px;padding:14px;font-weight:700;cursor:pointer;width:100%;margin-top:16px;}</style></head><body><div class="card"><h1>🔐 ENCLAVE PQC</h1><p>Pacte de <strong>${sf}</strong></p><button onclick="importPact()">Accepter le Pacte</button><div id="ok" style="display:none;color:#00e676;margin-top:15px;">✅ Pacte établi !</div></div><script>async function importPact(){const r=await fetch('/accept-pact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contact_id:${sc},secret:${ss}})});const d=await r.json();if(d.success)document.getElementById('ok').style.display='block';}</script></body></html>`);
 });
 
 app.post("/accept-pact", async (req, res) => {
   const { contact_id, secret } = req.body;
-  if (!contact_id || !secret) return res.status(400).json({ error: "Champs manquants" });
+  if (!contact_id || !secret) return res.status(400).json({ error: "Champs manquants." });
   await setSharedSecret(contact_id, secret);
   res.json({ success: true });
 });
 
-// ─── DÉMARRAGE ───────────────────────────────────────────────────
 const PORT = process.env.PORT || 8080;
-
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`\n🔐 Enclave PQC-OTP v2.0 opérationnelle`);
-  console.log(`   → URL : https://enclave-pqc-production-7090.up.railway.app`);
-  console.log(`   → Port : ${PORT}`);
-  console.log(`   → Owner : ${OWNER_ID}\n`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`\n🔐 Enclave PQC-OTP v3.0 — Multi-utilisateur`);
+  console.log(`   → Port : ${PORT}\n`);
 });
