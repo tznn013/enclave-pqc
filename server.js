@@ -337,10 +337,13 @@ app.post("/accept-pact", async (req, res) => {
   res.json({ success: true });
 });
 
-app.get("/debug/contacts", async (req, res) => {
+app.get("/debug/reset-contacts", async (req, res) => {
   const db = await require("./db").getDb();
-  const r = db.exec("SELECT id, owner_id, name, shared_secret FROM contacts");
-  res.json(r.length ? r[0].values : []);
+  db.run("DELETE FROM contacts");
+  db.run("DELETE FROM pact_requests");
+  db.run("DELETE FROM keys");
+  require("./db").save();
+  res.json({ success: true });
 });
 const PORT = process.env.PORT || 8080;
 // Initialise la DB au démarrage pour créer les tables avant la première requête
