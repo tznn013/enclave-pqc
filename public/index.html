@@ -1065,26 +1065,38 @@ async function createAccount() {
   showResult('acc-result', `✅ Compte créé pour ${name} !`, 'ok');
 }
 
-async function generateAccountQR() {
-  if (!myAccount) return alert('Créez d\'abord un compte');
+async function sendPactByEmail() {
+  if (!myAccount) return showResult('pact-email-result', '❌ Créez d\'abord un compte', 'err');
+  const dest = $('pact-email-dest').value.trim();
+  if (!dest) return showResult('pact-email-result', '❌ Email destinataire requis', 'err');
+
+  showResult('pact-email-result', '⏳ Génération du pacte...', 'ok');
+
   const contactId = 'contact-' + myAccount.email.replace(/[@.]/g, '_');
   const r = await api('POST', '/generate', { contact_id: contactId, count: 100 });
-  if (r.error) return alert(r.error);
+  if (r.error) return showResult('pact-email-result', '❌ ' + r.error, 'err');
 
-  // On n'inclut PAS la signature dans le QR — trop lourd
+  const statusData = await api('GET', '/status');
+  const baseUrl = statusData.public_url || window.location.origin;
   const identity = encodeURIComponent(JSON.stringify({
     name: myAccount.name,
     email: myAccount.email,
     device_id: myAccount.device_id,
     secret: r.pair_secret
   }));
+  const meetUrl = `${baseUrl}/meet?identity=${identity}`;
 
-const baseUrl = status.public_url || window.location.origin;
-  const url = `${baseUrl}/meet?identity=${identity}`;
-  const qrR = await api('GET', `/qrcode-identity?url=${encodeURIComponent(url)}`);
-  if (qrR.qr) {
-    $('account-qr-img').src = qrR.qr;
-    $('account-qr').style.display = 'block';
+  const emailRes = await api('POST', '/send-pact-email', {
+    to: dest,
+    from_name: myAccount.name,
+    meet_url: meetUrl
+  });
+
+  if (emailRes.success) {
+    showResult('pact-email-result', `✅ Pacte envoyé à ${dest} !`, 'ok');
+    $('pact-email-dest').value = '';
+  } else {
+    showResult('pact-email-result', '❌ ' + (emailRes.error || 'Erreur envoi email'), 'err');
   }
   await refresh();
 }
