@@ -2,6 +2,10 @@ const crypto = require("crypto");
 const { getDb, save } = require("./db");
 const KEY_SIZE = 256;
 
+// ─── HELPERS ─────────────────────────────────────────────────────
+// Toutes les requêtes avec variables utilisent db.prepare() + bind
+// pour éliminer toute possibilité d'injection SQL.
+
 async function generateKeyPool(contactId, count = 50) {
   const db = await getDb();
   const ids = [];
@@ -16,23 +20,30 @@ async function generateKeyPool(contactId, count = 50) {
   return ids;
 }
 
+// FIX: Remplacé db.exec() avec interpolation par db.prepare() + bind
 async function consumeKey(contactId) {
   const db = await getDb();
-  const res = db.exec(`SELECT id, key_blob FROM keys WHERE contact_id='${contactId}' AND status='free' LIMIT 1`);
-  if (!res.length || !res[0].values.length) return null;
-  const [id, keyBlob] = res[0].values[0];
-  // On marque 'used' mais on ne détruit pas encore — destruction après vérification
+  const stmt = db.prepare("SELECT id, key_blob FROM keys WHERE contact_id=? AND status='free' LIMIT 1");
+  const res = stmt.getAsObject({ 1: contactId });
+  stmt.free();
+  if (!res.id) return null;
+
+  const { id, key_blob: keyBlob } = res;
   db.run("UPDATE keys SET status='used' WHERE id=?", [id]);
   db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'USED','Signed - awaiting verification')", [id, contactId]);
   save();
   return { id, keyBlob: Buffer.from(keyBlob) };
 }
 
+// FIX: Remplacé db.exec() avec interpolation par db.prepare() + bind
 async function findAndConsumeKey(keyId, contactId) {
   const db = await getDb();
-  const res = db.exec(`SELECT id, key_blob FROM keys WHERE id='${keyId}' AND contact_id='${contactId}' AND status='used'`);
-  if (!res.length || !res[0].values.length) return null;
-  const [id, keyBlob] = res[0].values[0];
+  const stmt = db.prepare("SELECT id, key_blob FROM keys WHERE id=? AND contact_id=? AND status='used'");
+  const res = stmt.getAsObject({ 1: keyId, 2: contactId });
+  stmt.free();
+  if (!res.id) return null;
+
+  const { id, key_blob: keyBlob } = res;
   db.run("DELETE FROM keys WHERE id=?", [id]);
   db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'DESTROYED','Verified - PFS guaranteed')", [id, contactId]);
   save();
@@ -45,18 +56,36 @@ async function countAllFreeKeys() {
   return res.length ? res[0].values[0][0] : 0;
 }
 
+// FIX: limit est un entier, on le cast pour éviter toute injection
 async function getAuditLog(limit = 50) {
   const db = await getDb();
-  const res = db.exec(`SELECT a.timestamp, a.action, a.key_id, c.name, a.detail FROM audit_log a LEFT JOIN contacts c ON a.contact_id=c.id ORDER BY a.timestamp DESC LIMIT ${limit}`);
+  const safeLimit = Math.max(1, Math.min(500, parseInt(limit) || 50));
+  const res = db.exec(
+    `SELECT a.timestamp, a.action, a.key_id, c.name, a.detail
+     FROM audit_log a
+     LEFT JOIN contacts c ON a.contact_id=c.id
+     ORDER BY a.timestamp DESC
+     LIMIT ${safeLimit}`
+  );
   if (!res.length) return [];
-  return res[0].values.map(([timestamp, action, key_id, contact_name, detail]) => ({ timestamp, action, key_id, contact_name, detail }));
+  return res[0].values.map(([timestamp, action, key_id, contact_name, detail]) => ({
+    timestamp, action, key_id, contact_name, detail
+  }));
 }
 
+// FIX: on ajoute owner_id dans le SELECT pour que le filtre dans server.js fonctionne
 async function getContacts() {
   const db = await getDb();
-  const res = db.exec(`SELECT c.id, c.name, c.device_id, COUNT(k.id) as free_keys FROM contacts c LEFT JOIN keys k ON k.contact_id=c.id AND k.status='free' GROUP BY c.id`);
+  const res = db.exec(
+    `SELECT c.id, c.owner_id, c.name, c.device_id, COUNT(k.id) as free_keys
+     FROM contacts c
+     LEFT JOIN keys k ON k.contact_id=c.id AND k.status='free'
+     GROUP BY c.id`
+  );
   if (!res.length) return [];
-  return res[0].values.map(([id, name, device_id, free_keys]) => ({ id, name, device_id, free_keys }));
+  return res[0].values.map(([id, owner_id, name, device_id, free_keys]) => ({
+    id, owner_id, name, device_id, free_keys
+  }));
 }
 
 async function setSharedSecret(contactId, secret) {
@@ -65,11 +94,14 @@ async function setSharedSecret(contactId, secret) {
   save();
 }
 
+// FIX: Remplacé db.exec() avec interpolation par db.prepare() + bind
 async function getSharedSecret(contactId) {
   const db = await getDb();
-  const res = db.exec(`SELECT shared_secret FROM contacts WHERE id='${contactId}'`);
-  if (!res.length || !res[0].values[0][0]) return null;
-  return res[0].values[0][0];
+  const stmt = db.prepare("SELECT shared_secret FROM contacts WHERE id=?");
+  const res = stmt.getAsObject({ 1: contactId });
+  stmt.free();
+  if (!res.shared_secret) return null;
+  return res.shared_secret;
 }
 
 async function getDeviceId() {
