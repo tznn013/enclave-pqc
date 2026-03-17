@@ -32,14 +32,17 @@ async function consumeKey(contactId) {
 
     const { id, key_blob: keyBlob } = res;
     db.run("UPDATE keys SET status='used' WHERE id=? AND status='free'", [id]);
-    const changes = typeof db.getRowsModified === 'function' ? db.getRowsModified() : null;
-    if (changes && changes > 0) {
+
+    const verify = db.exec("SELECT status FROM keys WHERE id=?", [id]);
+    const status = verify.length ? verify[0].values[0][0] : null;
+
+    if (status === 'used') {
       db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'USED','Signed - awaiting verification')", [id, contactId]);
       save();
       return { id, keyBlob: Buffer.from(keyBlob) };
     }
 
-    // Possible race: key was consumed by concurrent request. Retry.
+    // Possible race: key was consumed par un autre processus. Retente.
     continue;
   }
 }
