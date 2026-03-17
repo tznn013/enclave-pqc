@@ -49,6 +49,13 @@ app.use(express.static(path.join(__dirname, "public")));
 const escapeHtml = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#x27;");
 const isValidEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 
+// ─── LOGGER ──────────────────────────────────────────────────────
+function log(action, user, detail = "") {
+  const who = user ? `[${user.name || user.email || user.id}]` : "[anonyme]";
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  console.log(`${ts} ${who} ${action}${detail ? " — " + detail : ""}`);
+}
+
 // Auth
 function authRequired(req, res, next) {
   const token = req.cookies?.enclave_token;
@@ -81,7 +88,7 @@ app.post("/auth/register", authLimiter, async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     db.run("INSERT INTO users (id,email,password_hash,name,device_id) VALUES (?,?,?,?,?)", [id, email.toLowerCase(), hash, name.trim(), device_id]);
     require("./db").save();
-    console.log('User registered:', email.toLowerCase(), id);
+    log('✅ Inscription', { name: name.trim(), email: email.toLowerCase() });
     const user = { id, email: email.toLowerCase(), name: name.trim(), device_id };
     res.status(201).json({ user: issueToken(res, user) });
   } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
@@ -98,12 +105,20 @@ app.post("/auth/login", authLimiter, async (req, res) => {
     if (!user.id) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
+    log('🔑 Connexion', user);
     res.json({ user: issueToken(res, user) });
   } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // POST /auth/logout
 app.post("/auth/logout", (req, res) => {
+  const token = req.cookies?.enclave_token;
+  if (token) {
+    try {
+      const payload = require("jsonwebtoken").verify(token, JWT_SECRET);
+      log("👋 Déconnexion", payload);
+    } catch {}
+  }
   res.clearCookie("enclave_token");
   res.json({ success: true });
 });
@@ -126,7 +141,7 @@ app.get("/users/search", authRequired, async (req, res) => {
   try {
     const db = await require("./db").getDb();
     const p = `%${q}%`;
-    console.log('Search query:', q, 'by user:', req.user.id);
+    log('🔍 Recherche utilisateur', req.user, `"${q}"`);
     const raw = db.exec(
       "SELECT id,name,device_id FROM users WHERE (name LIKE ? OR email LIKE ?) AND id != ? LIMIT 20",
       [p, p, req.user.id]
@@ -165,6 +180,9 @@ app.post("/pact/request", sensitiveLimiter, authRequired, async (req, res) => {
     const id = "req-" + crypto.randomBytes(8).toString("hex");
     db.run("INSERT INTO pact_requests (id,from_user_id,to_user_id) VALUES (?,?,?)", [id, req.user.id, to_user_id]);
     require("./db").save();
+    const _rname = db.exec("SELECT name FROM users WHERE id=?", [to_user_id]);
+    const targetName = _rname.length ? _rname[0].values[0][0] : to_user_id;
+    log("⚡ Demande de pacte envoyée", req.user, `vers ${targetName}`);
     res.status(201).json({ success: true });
   } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
@@ -206,7 +224,7 @@ app.post("/pact/accept/:id", sensitiveLimiter, authRequired, async (req, res) =>
     require("./db").save();
 
     await generatePairedKeyPool(cid1, cid2, 100);
-
+    log("✅ Pacte accepté", req.user, `avec ${uFrom.name} — 200 clés générées`);
     res.json({ success: true, message: "Canal chiffré établi — 200 clés (100 paires) générées." });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -220,6 +238,7 @@ app.post("/pact/reject/:id", authRequired, async (req, res) => {
     if (!r.id) return res.status(404).json({ error: "Introuvable." });
     db.run("UPDATE pact_requests SET status='rejected' WHERE id=?", [req.params.id]);
     require("./db").save();
+    log("❌ Pacte refusé", req.user);
     res.json({ success: true });
   } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
@@ -240,6 +259,7 @@ app.post("/auth/change-password", authLimiter, authRequired, async (req, res) =>
     const newHash = await bcrypt.hash(new_password, 10);
     db.run("UPDATE users SET password_hash=? WHERE id=?", [newHash, req.user.id]);
     require("./db").save();
+    log("🔐 Mot de passe modifié", req.user);
     res.json({ success: true, message: "Mot de passe modifié avec succès." });
   } catch(e) { console.error("change-password error:", e.message); res.status(500).json({ error: e.message }); }
 });
@@ -269,6 +289,7 @@ app.delete("/pact/:contact_id", authRequired, async (req, res) => {
     db.run("UPDATE pact_requests SET status='revoked' WHERE (from_user_id=? OR to_user_id=?) AND status='accepted'", [req.user.id, req.user.id]);
 
     require("./db").save();
+    log("🗑️  Pacte révoqué", req.user, `contact ${contact_id}`);
     res.json({ success: true, message: "Pacte révoqué et clés supprimées." });
   } catch(e) { console.error("revoke pact error:", e.message); res.status(500).json({ error: e.message }); }
 });
@@ -361,6 +382,7 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
       sent_at: Date.now()
     };
     await depositMessage(keyData.id, payload);
+    log("📤 Message envoyé", req.user, `key:${keyData.id}${fileUploaded ? " + PJ" : ""}`);
     res.json({ success: true, key_id: keyData.id, pair_id: keyData.pairId, file_uploaded: fileUploaded, message: "Message chiffré & déposé." });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -397,6 +419,7 @@ app.post("/receive", sensitiveLimiter, authRequired, async (req, res) => {
     if (!ok) {
       await deleteMessage(key_id);
       if (payload.file_name) await deleteFile(key_id, payload.file_name).catch(() => {});
+      log("⚠️  Signature invalide", req.user, `key:${key_id}`);
       return res.status(400).json({ error: "Signature invalide — message rejeté." });
     }
     let fileData = null;
@@ -413,6 +436,7 @@ app.post("/receive", sensitiveLimiter, authRequired, async (req, res) => {
       }
     }
     await deleteMessage(key_id);
+    log("📥 Message reçu", req.user, `key:${key_id}${payload.file_name ? " + PJ:" + payload.file_name : ""}`);
     res.json({ valid: true, subject, body, file_name: payload.file_name, file_data: fileData, sent_at: payload.sent_at, pfs: "Clé détruite + message supprimé." });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
