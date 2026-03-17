@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Enclave PQC-OTP — Carousel Digital</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #060910;
+  --surface: #0b0f1a;
+  --surface2: #101520;
+  --surface3: #161d2e;
+  --border: #1c2840;
+  --border2: #243350;
+  --accent: #00e5ff;
+  --accent-dim: rgba(0,229,255,.12);
+  --accent2: #7c3aed;
+  --accent2-dim: rgba(124,58,237,.12);
+  --green: #00e676;
+  --green-dim: rgba(0,230,118,.1);
+  --red: #ff1744;
+  --red-dim: rgba(255,23,68,.08);
+  --yellow: #ffd600;
+  --text: #e2eeff;
+  --text2: #8ba3c7;
+  --muted: #3d5470;
+  --mono: 'Space Mono', monospace;
+  --sans: 'Syne', sans-serif;
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── SCANLINE EFFECT ── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.03) 2px, rgba(0,0,0,.03) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── GLOW ORBS ── */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: .15;
+}
+.orb-1 { width: 400px; height: 400px; background: var(--accent2); top: -100px; right: -100px; }
+.orb-2 { width: 300px; height: 300px; background: var(--accent); bottom: 100px; left: -80px; }
+
+/* ── LAYOUT ── */
+.shell {
+  display: flex;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── SIDEBAR (desktop) ── */
+.sidebar {
+  width: 240px;
+  min-height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  flex-shrink: 0;
+}
+
+.sidebar-logo {
+  padding: 28px 24px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-logo-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.sidebar-icon {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem;
+  box-shadow: 0 0 20px rgba(0,229,255,.3);
+}
+.sidebar-title {
+  font-family: var(--mono);
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 3px;
+}
+.sidebar-sub {
+  font-size: .65rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  letter-spacing: 1px;
+}
+
+.sidebar-status {
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .7rem;
+  color: var(--text2);
+  font-family: var(--mono);
+  border-bottom: 1px solid var(--border);
+}
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  flex-shrink: 0;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+
+.sidebar-nav {
+  flex: 1;
+  padding: 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text2);
+  font-family: var(--sans);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  text-align: left;
+  letter-spacing: .5px;
+  width: 100%;
+}
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active {
+  background: var(--accent-dim);
+  border-color: rgba(0,229,255,.2);
+  color: var(--accent);
+}
+.nav-item-icon { font-size: .9rem; flex-shrink: 0; }
+.nav-badge {
+  margin-left: auto;
+  background: var(--accent2-dim);
+  color: var(--accent2);
+  font-family: var(--mono);
+  font-size: .6rem;
+  padding: 2px 6px;
+  border-radius: 99px;
+  font-weight: 700;
+}
+
+.sidebar-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  font-size: .65rem;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+/* ── MAIN CONTENT ── */
+.main {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 100vh;
+}
+
+/* ── MOBILE HEADER ── */
+.mobile-header {
+  display: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.mobile-logo {
+  font-family: var(--mono);
+  font-size: .8rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mobile-icon {
+  width: 26px; height: 26px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .75rem;
+}
+.mobile-status {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: .65rem; color: var(--text2);
+}
+
+/* ── MOBILE NAV ── */
+.mobile-nav {
+  display: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.mobile-nav::-webkit-scrollbar { display: none; }
+.mobile-nav-inner {
+  display: flex;
+  padding: 0 4px;
+}
+.mobile-nav-item {
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .15s;
+  letter-spacing: .5px;
+}
+.mobile-nav-item.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── PAGES ── */
+.page { display: none; padding: 24px; max-width: 680px; animation: fadein .2s ease; }
+.page.active { display: block; }
+@keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+
+/* ── CARDS ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-bottom: 16px;
+}
+.card + .card { }
+.card-title {
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── STATS GRID ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.stat-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.stat-box::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  opacity: .4;
+}
+.stat-val {
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: var(--accent);
+  font-family: var(--mono);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.stat-lbl {
+  font-size: .6rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+/* ── POOL BAR ── */
+.pool-bar-wrap { margin-top: 4px; }
+.pool-bar-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68rem;
+  color: var(--text2);
+  font-family: var(--mono);
+  margin-bottom: 6px;
+}
+.pool-bar-bg {
+  height: 4px;
+  background: var(--surface2);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.pool-bar {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .6s ease, background .3s;
+  background: var(--green);
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* ── CONTACT CHIPS ── */
+.contact-list { display: flex; flex-direction: column; gap: 8px; }
+.contact-chip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color .15s;
+}
+.contact-chip:hover { border-color: var(--border2); }
+.contact-avatar {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800;
+  font-size: .9rem;
+  color: #000;
+  flex-shrink: 0;
+}
+.contact-info { flex: 1; min-width: 0; }
+.contact-name { font-weight: 700; font-size: .88rem; }
+.contact-meta { font-size: .68rem; color: var(--text2); font-family: var(--mono); margin-top: 2px; }
+.chip-badge {
+  font-size: .6rem;
+  font-family: var(--mono);
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+.chip-ok { background: var(--green-dim); color: var(--green); }
+.chip-warn { background: rgba(255,214,0,.1); color: var(--yellow); }
+.chip-empty { background: var(--red-dim); color: var(--red); }
+
+/* ── FORMS ── */
+.form-label {
+  display: block;
+  font-size: .62rem;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-family: var(--mono);
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+.form-input, .form-select, .form-textarea {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font-family: var(--mono);
+  font-size: .82rem;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+  appearance: none;
+}
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,229,255,.08);
+}
+.form-textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
+.form-input-flex { width: 0; min-width: 0; flex: 1; }
+.form-select { cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238ba3c7' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+
+/* ── BUTTONS ── */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: .85rem;
+  cursor: pointer;
+  transition: all .15s;
+  margin-top: 14px;
+  letter-spacing: .5px;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #000;
+  box-shadow: 0 4px 20px rgba(0,229,255,.25);
+}
+.btn-primary:hover { background: #33ecff; box-shadow: 0 4px 24px rgba(0,229,255,.4); }
+.btn-purple {
+  background: var(--accent2);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(124,58,237,.25);
+}
+.btn-purple:hover { background: #8b4cf7; }
+.btn-green {
+  background: var(--green);
+  color: #000;
+  box-shadow: 0 4px 20px rgba(0,230,118,.2);
+}
+.btn-green:hover { background: #33eb8f; }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--text2);
+  margin-top: 8px;
+}
+.btn-ghost:hover { background: var(--surface2); color: var(--text); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── RESULTS ── */
+.result {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  font-size: .75rem;
+  font-family: var(--mono);
+  word-break: break-all;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  display: none;
+}
+.result.ok { background: var(--green-dim); border: 1px solid rgba(0,230,118,.25); color: var(--green); display: block; }
+.result.err { background: var(--red-dim); border: 1px solid rgba(255,23,68,.2); color: var(--red); display: block; }
+.result.info { background: var(--accent-dim); border: 1px solid rgba(0,229,255,.2); color: var(--accent); display: block; }
+
+/* ── PFS BANNER ── */
+.pfs-banner {
+  display: none;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,23,68,.05);
+  border: 1px solid rgba(255,23,68,.15);
+  font-size: .72rem;
+  font-family: var(--mono);
+  color: #ff6b6b;
+}
+
+/* ── QR WRAP ── */
+.qr-wrap {
+  display: none;
+  margin-top: 16px;
+  padding: 20px;
+  background: #fff;
+  border-radius: var(--radius);
+  text-align: center;
+}
+.qr-wrap img { max-width: 200px; border-radius: 8px; display: block; margin: 0 auto; }
+.qr-url {
+  margin-top: 10px;
+  font-size: .58rem;
+  color: #555;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+/* ── FILE ZONE ── */
+.file-zone {
+  margin-top: 14px;
+  border: 2px dashed var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  position: relative;
+}
+.file-zone:hover { border-color: var(--accent); background: var(--accent-dim); }
+.file-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file-zone-label { font-size: .78rem; color: var(--text2); font-family: var(--mono); }
+.file-attached {
+  margin-top: 8px;
+  font-size: .72rem;
+  color: var(--accent);
+  font-family: var(--mono);
+  display: none;
+}
+.attach-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  display: none;
+}
+.attach-toggle input[type=checkbox] { width: auto; accent-color: var(--accent); }
+.attach-toggle span { font-size: .78rem; color: var(--text2); }
+
+/* ── SIGNATURE CANVAS ── */
+.canvas-wrap {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface2);
+  touch-action: none;
+}
+canvas { display: block; width: 100%; cursor: crosshair; }
+
+/* ── ACCOUNT CARD ── */
+.account-preview {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.account-avatar-big {
+  width: 52px; height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #000;
+  flex-shrink: 0;
+}
+.account-info { flex: 1; }
+.account-name { font-weight: 700; font-size: .95rem; }
+.account-email { font-size: .72rem; color: var(--text2); font-family: var(--mono); margin-top: 3px; }
+.account-device { font-size: .65rem; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+
+/* ── AUDIT LOG ── */
+.audit-list { display: flex; flex-direction: column; gap: 6px; }
+.audit-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid transparent;
+}
+.audit-item.GENERATED { border-left-color: var(--accent2); }
+.audit-item.USED { border-left-color: var(--yellow); }
+.audit-item.DESTROYED { border-left-color: var(--red); }
+.audit-icon { font-size: .9rem; flex-shrink: 0; margin-top: 1px; }
+.audit-body { flex: 1; min-width: 0; }
+.audit-action {
+  font-family: var(--mono);
+  font-size: .72rem;
+  font-weight: 700;
+}
+.audit-action.GENERATED { color: var(--accent2); }
+.audit-action.USED { color: var(--yellow); }
+.audit-action.DESTROYED { color: var(--red); }
+.audit-meta { font-size: .65rem; color: var(--muted); font-family: var(--mono); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-time { font-size: .62rem; color: var(--muted); font-family: var(--mono); flex-shrink: 0; }
+
+/* ── SECRET PILL ── */
+.secret-pill {
+  display: none;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--accent2-dim);
+  border: 1px solid rgba(124,58,237,.2);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: .7rem;
+  color: #a78bfa;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+/* ── MOBILE ── */
+@media(max-width: 768px) {
+  .sidebar { display: none; }
+  .mobile-header { display: flex; }
+  .mobile-nav { display: block; }
+  .page { padding: 16px; }
+  .stats-grid { gap: 8px; }
+  .stat-val { font-size: 1.4rem; }
+}
+
+
+/* ── AUTH OVERLAY ── */
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 32px;
+  max-width: 420px; width: 100%;
+}
+.auth-logo {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 28px;
+}
+.auth-logo-icon {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem;
+}
+.auth-logo-text { font-family: var(--mono); font-size: .85rem; font-weight: 700; color: var(--accent); letter-spacing: 3px; }
+.auth-tabs { display: flex; gap: 4px; margin-bottom: 24px; background: var(--surface2); border-radius: var(--radius-sm); padding: 4px; }
+.auth-tab {
+  flex: 1; padding: 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text2);
+  font-family: var(--sans); font-size: .82rem; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.auth-tab.active { background: var(--surface3); color: var(--text); }
+.auth-panel { display: none; }
+.auth-panel.active { display: block; }
+.auth-footer { margin-top: 16px; text-align: center; font-size: .72rem; color: var(--muted); }
+
+/* ── ANNUAIRE ── */
+.user-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.user-card-avatar {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 1rem; color: #000; flex-shrink: 0;
+}
+.user-card-info { flex: 1; }
+.user-card-name { font-weight: 600; font-size: .88rem; }
+.user-card-device { font-size: .65rem; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+.pact-req-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px; background: var(--accent2-dim);
+  border: 1px solid rgba(124,58,237,.25);
+  border-radius: var(--radius-sm); margin-bottom: 8px;
+}
+.pact-req-actions { display: flex; gap: 8px; margin-left: auto; }
+.btn-accept { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,230,118,.25); border-radius: 6px; padding: 6px 12px; font-size: .75rem; font-weight: 700; cursor: pointer; }
+.btn-reject { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,23,68,.2); border-radius: 6px; padding: 6px 12px; font-size: .75rem; font-weight: 700; cursor: pointer; }
+
+/* ── USER INFO IN SIDEBAR ── */
+.sidebar-user {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.sidebar-user-avatar {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 800; color: #000; flex-shrink: 0;
+}
+.sidebar-user-info { flex: 1; min-width: 0; }
+.sidebar-user-name { font-size: .78rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-user-email { font-size: .62rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn-logout { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: .65rem; padding: 4px 8px; cursor: pointer; flex-shrink: 0; }
+.btn-logout:hover { color: var(--red); border-color: var(--red); }
+
+/* ── NOTIFICATION BADGE ── */
+.notif-badge {
+  background: var(--red); color: #fff;
+  font-family: var(--mono); font-size: .58rem;
+  padding: 2px 6px; border-radius: 99px; font-weight: 700;
+  display: none;
+}
+.notif-badge.visible { display: inline-block; }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 99px; }
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+
+<!-- ── AUTH OVERLAY ── -->
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">🔐</div>
+      <div class="auth-logo-text">ENCLAVE PQC</div>
+    </div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" onclick="switchAuthTab('login')">Connexion</button>
+      <button class="auth-tab" onclick="switchAuthTab('register')">Inscription</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="auth-panel active" id="auth-login">
+      <div class="form-label">Email</div>
+      <input class="form-input" id="login-email" type="email" placeholder="alice@exemple.com" autocomplete="email">
+      <div class="form-label">Mot de passe</div>
+      <input class="form-input" id="login-password" type="password" placeholder="••••••••" autocomplete="current-password">
+      <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="doLogin()">Se connecter</button>
+      <div class="result" id="login-result"></div>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="auth-panel" id="auth-register">
+      <div class="form-label">Nom complet</div>
+      <input class="form-input" id="reg-name" type="text" placeholder="Alice Dupont" autocomplete="name">
+      <div class="form-label">Email</div>
+      <input class="form-input" id="reg-email" type="email" placeholder="alice@exemple.com" autocomplete="email">
+      <div class="form-label">Mot de passe <span style="color:var(--muted);font-size:.65rem">(8 caractères min)</span></div>
+      <input class="form-input" id="reg-password" type="password" placeholder="••••••••" autocomplete="new-password">
+      <button class="btn btn-purple" style="margin-top:16px;width:100%" onclick="doRegister()">Créer mon compte</button>
+      <div class="result" id="reg-result"></div>
+    </div>
+
+    <div class="auth-footer">Canal chiffré OTP · Post-Quantum Ready</div>
+  </div>
+</div>
+
+<div class="shell">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-mark">
+        <div class="sidebar-icon">🔐</div>
+        <div class="sidebar-title">ENCLAVE</div>
+      </div>
+      <div class="sidebar-sub">PQC-OTP v2.0 — Carousel Digital</div>
+    </div>
+    <div class="sidebar-status">
+      <div class="status-dot"></div>
+      <span id="sb-device">Connexion...</span>
+    </div>
+    <div class="sidebar-user" id="sidebar-user" style="display:none">
+      <div class="sidebar-user-avatar" id="sb-avatar">?</div>
+      <div class="sidebar-user-info">
+        <div class="sidebar-user-name" id="sb-name">—</div>
+        <div class="sidebar-user-email" id="sb-email">—</div>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">↩</button>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="home">
+        <span class="nav-item-icon">🏠</span> Accueil
+      </button>
+      <button class="nav-item" data-page="annuaire">
+        <span class="nav-item-icon">🔍</span> Annuaire
+        <span class="notif-badge" id="sb-notif">0</span>
+      </button>
+      <button class="nav-item" data-page="account">
+        <span class="nav-item-icon">👤</span> Mon Compte
+      </button>
+      <button class="nav-item" data-page="send">
+        <span class="nav-item-icon">📤</span> Envoyer
+      </button>
+      <button class="nav-item" data-page="receive">
+        <span class="nav-item-icon">📥</span> Recevoir
+      </button>
+      <button class="nav-item" data-page="audit">
+        <span class="nav-item-icon">📋</span> Audit
+        <span class="nav-badge" id="sb-keys">—</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div>XOR OTP · SHA-256 · SQLite</div>
+      <div style="margin-top:3px;color:var(--accent);opacity:.6">Post-Quantum Ready ✓</div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <main class="main">
+
+    <!-- Mobile Header -->
+    <header class="mobile-header">
+      <div class="mobile-logo">
+        <div class="mobile-icon">🔐</div>
+        ENCLAVE
+      </div>
+      <div class="mobile-status">
+        <div class="status-dot"></div>
+        <span id="mb-device">...</span>
+      </div>
+    </header>
+
+    <!-- Mobile Nav -->
+    <div class="mobile-nav">
+      <div class="mobile-nav-inner">
+        <button class="mobile-nav-item active" data-page="home">🏠 Accueil</button>
+        <button class="mobile-nav-item" data-page="annuaire">🔍 Annuaire</button>
+        <button class="mobile-nav-item" data-page="account">👤 Compte</button>
+        <button class="mobile-nav-item" data-page="send">📤 Envoyer</button>
+        <button class="mobile-nav-item" data-page="receive">📥 Recevoir</button>
+        <button class="mobile-nav-item" data-page="audit">📋 Audit</button>
+      </div>
+    </div>
+
+    <!-- ── PAGE : ACCUEIL ── -->
+    <div class="page active" id="page-home">
+      <div class="card">
+        <div class="card-title">État de l'Enclave</div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-val" id="st-keys">—</div>
+            <div class="stat-lbl">Clés OTP</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" id="st-device" style="font-size:.9rem;padding-top:4px">—</div>
+            <div class="stat-lbl">Device ID</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" style="color:var(--green);font-size:.9rem;padding-top:4px">XOR OTP</div>
+            <div class="stat-lbl">Algorithme</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" style="color:var(--green);font-size:.9rem;padding-top:4px">✓ PQC</div>
+            <div class="stat-lbl">Post-Quantique</div>
+          </div>
+        </div>
+        <div class="pool-bar-wrap">
+          <div class="pool-bar-header">
+            <span>Niveau du pool de clés</span>
+            <span id="pool-pct">0%</span>
+          </div>
+          <div class="pool-bar-bg">
+            <div class="pool-bar" id="pool-bar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Contacts</div>
+        <div class="contact-list" id="contact-list">
+          <div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Chargement...</div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ── PAGE : ANNUAIRE ── -->
+    <div class="page" id="page-annuaire">
+      <!-- Demandes en attente -->
+      <div class="card" id="pending-card">
+        <div class="card-title">🔔 Demandes de pacte reçues</div>
+        <div id="pending-list">
+          <div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucune demande en attente</div>
+        </div>
+      </div>
+      <!-- Recherche utilisateurs -->
+      <div class="card">
+        <div class="card-title">🔍 Trouver un utilisateur</div>
+        <input class="form-input" id="search-query" placeholder="Nom ou email..." type="text" style="width:100%;margin-bottom:8px">
+        <button class="btn btn-primary" onclick="searchUsers()" style="width:100%">Chercher</button>
+        <div class="result" id="search-result" style="margin-top:8px"></div>
+        <div id="search-results" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- ── PAGE : COMPTE ── -->
+    <div class="page" id="page-account">
+      <div class="card">
+        <div class="card-title">Mon identité</div>
+        <div class="account-preview">
+          <div class="account-avatar-big" id="acc-avatar">?</div>
+          <div class="account-info">
+            <div class="account-name" id="acc-name">—</div>
+            <div class="account-email" id="acc-email">—</div>
+            <div class="account-device" id="acc-device">—</div>
+          </div>
+        </div>
+        <canvas id="sig-preview" height="70" style="border-radius:8px;background:var(--surface2);width:100%"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-title">Ma signature</div>
+        <div class="form-label">Dessinez votre signature</div>
+        <div class="canvas-wrap">
+          <canvas id="sig-canvas" height="90"></canvas>
+        </div>
+        <button class="btn btn-ghost" onclick="clearSig()">↺ Effacer</button>
+        <button class="btn btn-purple" onclick="saveSignature()">💾 Sauvegarder la signature</button>
+        <div class="result" id="acc-result"></div>
+      </div>
+    </div>
+
+    <!-- Pacte page removed — handled in Annuaire -->
+
+    <!-- ── PAGE : ENVOYER ── -->
+    <div class="page" id="page-send">
+      <div class="card">
+        <div class="card-title">📤 Signer & Envoyer via NextCloud</div>
+        <div class="form-label">Destinataire</div>
+        <select class="form-select" id="send-contact"></select>
+        <div class="form-label">Sujet</div>
+        <input class="form-input" id="send-subject" value="Rapport Q3 Carousel Digital" type="text">
+        <div class="form-label">Message</div>
+        <textarea class="form-textarea" id="send-body">Bonjour, veuillez trouver ci-joint le rapport trimestriel. Cordialement.</textarea>
+
+        <div class="file-zone" id="file-zone">
+          <input type="file" id="file-input" onchange="onFileSelect(this)">
+          <div class="file-zone-label">📎 Cliquez pour joindre un fichier</div>
+          <div class="file-attached" id="file-attached"></div>
+        </div>
+        <div class="attach-toggle" id="attach-toggle">
+          <input type="checkbox" id="sign-attach" checked>
+          <span>Inclure la pièce jointe dans la signature cryptographique</span>
+        </div>
+
+        <button class="btn btn-primary" onclick="doSend()">🔐 Signer & Déposer sur NextCloud</button>
+        <div class="result" id="send-result"></div>
+        <div class="pfs-banner" id="send-pfs">🔥 Clé OTP détruite après signature — Perfect Forward Secrecy garanti</div>
+      </div>
+    </div>
+
+    <!-- ── PAGE : RECEVOIR ── -->
+    <div class="page" id="page-receive">
+      <div class="card">
+        <div class="card-title">📥 Récupérer & Vérifier depuis NextCloud</div>
+        <div class="form-label">Contact expéditeur</div>
+        <select class="form-select" id="receive-contact"></select>
+        <div class="form-label">Key ID (reçu avec le message)</div>
+        <input class="form-input" id="receive-key-id" placeholder="key-xxxxxxxxxxxx">
+        <button class="btn btn-green" onclick="doReceive()">🔍 Récupérer & Vérifier l'authenticité</button>
+        <div class="result" id="receive-result"></div>
+        <div class="pfs-banner" id="receive-pfs">🔥 Clé détruite + message supprimé de NextCloud — PFS garanti</div>
+      </div>
+    </div>
+
+    <!-- ── PAGE : AUDIT ── -->
+    <div class="page" id="page-audit">
+      <div class="card">
+        <div class="card-title">📋 Journal d'Audit — Cycle de vie des clés</div>
+        <div class="audit-list" id="audit-list">
+          <div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Chargement...</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+'use strict';
+
+// ── UTILS ─────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const r = await fetch(path, opts);
+    if (r.status === 401) { showAuthOverlay(); return { error: 'Non authentifié' }; }
+    return r.json();
+  } catch(e) { return { error: e.message }; }
+}
+
+function showResult(id, msg, type) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `result ${type}`;
+}
+
+// ── AUTH ──────────────────────────────────────────────────────
+let currentUser = null;
+
+function showAuthOverlay() {
+  $('auth-overlay').style.display = 'flex';
+  $('sidebar-user').style.display = 'none';
+}
+
+function hideAuthOverlay() {
+  $('auth-overlay').style.display = 'none';
+  $('sidebar-user').style.display = 'flex';
+}
+
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='register')));
+  $('auth-login').classList.toggle('active', tab === 'login');
+  $('auth-register').classList.toggle('active', tab === 'register');
+}
+
+async function checkAuth() {
+  const user = await api('GET', '/auth/me');
+  if (user.error) { showAuthOverlay(); return false; }
+  currentUser = user;
+  hideAuthOverlay();
+  updateUserUI();
+  return true;
+}
+
+async function doLogin() {
+  const email = $('login-email').value.trim();
+  const password = $('login-password').value;
+  if (!email || !password) return showResult('login-result', '❌ Tous les champs sont requis.', 'err');
+  const r = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email, password }), credentials: 'same-origin' });
+  const d = await r.json();
+  if (d.error) return showResult('login-result', '❌ ' + d.error, 'err');
+  currentUser = d.user;
+  $('login-password').value = '';
+  hideAuthOverlay();
+  updateUserUI();
+  refresh();
+}
+
+async function doRegister() {
+  const name = $('reg-name').value.trim();
+  const email = $('reg-email').value.trim();
+  const password = $('reg-password').value;
+  if (!name || !email || !password) return showResult('reg-result', '❌ Tous les champs sont requis.', 'err');
+  const r = await fetch('/auth/register', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, email, password }), credentials: 'same-origin' });
+  const d = await r.json();
+  if (d.error) return showResult('reg-result', '❌ ' + d.error, 'err');
+  currentUser = d.user;
+  $('reg-password').value = '';
+  hideAuthOverlay();
+  updateUserUI();
+  refresh();
+}
+
+async function doLogout() {
+  await api('POST', '/auth/logout');
+  currentUser = null;
+  showAuthOverlay();
+}
+
+function updateUserUI() {
+  if (!currentUser) return;
+  const initial = (currentUser.name || '?').charAt(0).toUpperCase();
+  // Sidebar
+  $('sb-avatar').textContent = initial;
+  $('sb-name').textContent = currentUser.name;
+  $('sb-email').textContent = currentUser.email;
+  // Account page
+  $('acc-avatar').textContent = initial;
+  $('acc-name').textContent = currentUser.name;
+  $('acc-email').textContent = currentUser.email;
+  $('acc-device').textContent = currentUser.device_id || '—';
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────
+function initNav() {
+  document.querySelectorAll('[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const page = btn.dataset.page;
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('[data-page]').forEach(b => b.classList.remove('active'));
+      $(`page-${page}`)?.classList.add('active');
+      document.querySelectorAll(`[data-page="${page}"]`).forEach(b => b.classList.add('active'));
+      if (page === 'audit') refreshAudit();
+      if (page === 'account') setTimeout(initCanvas, 50);
+      if (page === 'annuaire') refreshPendingRequests();
+    });
+  });
+}
+
+// ── DATA REFRESH ──────────────────────────────────────────────
+let contacts = [];
+
+async function refresh() {
+  const status = await api('GET', '/status');
+  if (status.error) return;
+
+  const keys = status.keys_available ?? 0;
+  $('st-keys').textContent = keys;
+  $('st-device').textContent = status.device_id ?? '—';
+  $('sb-device').textContent = status.device_id ?? '—';
+  $('mb-device').textContent = status.device_id ?? '—';
+  $('sb-keys').textContent = keys;
+
+  const pct = Math.min(100, (keys / 200) * 100);
+  const bar = $('pool-bar');
+  bar.style.width = pct + '%';
+  bar.style.background = pct > 50 ? 'var(--green)' : pct > 20 ? 'var(--yellow)' : 'var(--red)';
+  $('pool-pct').textContent = Math.round(pct) + '%';
+
+  await refreshContacts();
+  await refreshPendingCount();
+}
+
+async function refreshContacts() {
+  const data = await api('GET', '/contacts');
+  if (!Array.isArray(data)) return;
+  contacts = data;
+
+  $('contact-list').innerHTML = contacts.length ? contacts.map(c => `
+    <div class="contact-chip">
+      <div class="contact-avatar">${c.name.charAt(0).toUpperCase()}</div>
+      <div class="contact-info">
+        <div class="contact-name">${c.name}</div>
+        <div class="contact-meta">${c.free_keys} clés disponibles · ${c.device_id}</div>
+      </div>
+      <span class="chip-badge ${c.free_keys > 20 ? 'chip-ok' : c.free_keys > 5 ? 'chip-warn' : 'chip-empty'}">
+        ${c.free_keys > 20 ? '✓ OK' : c.free_keys > 0 ? '⚠ BAS' : '✗ VIDE'}
+      </span>
+    </div>
+  `).join('') : '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucun contact — établissez un pacte via l\'Annuaire</div>';
+
+  const selects = ['send-contact', 'receive-contact'];
+  selects.forEach(id => {
+    const sel = $(id);
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = contacts.map(c =>
+      `<option value="${c.id}">${c.name} (${c.free_keys} clés)</option>`
+    ).join('');
+    if (prev && contacts.find(c => c.id === prev)) sel.value = prev;
+  });
+}
+
+async function refreshAudit() {
+  const logs = await api('GET', '/audit?limit=40');
+  if (!Array.isArray(logs)) return;
+  const icons = { GENERATED: '🔑', USED: '✍️', DESTROYED: '🔥' };
+  $('audit-list').innerHTML = logs.length ? logs.map(l => `
+    <div class="audit-item ${l.action}">
+      <div class="audit-icon">${icons[l.action] || '•'}</div>
+      <div class="audit-body">
+        <div class="audit-action ${l.action}">${l.action}</div>
+        <div class="audit-meta">${l.key_id ? l.key_id.slice(0,22) + '...' : ''}${l.contact_name ? ' — ' + l.contact_name : ''}</div>
+        <div class="audit-meta">${l.detail || ''}</div>
+      </div>
+      <div class="audit-time">${new Date(l.timestamp * 1000).toLocaleTimeString('fr-FR')}</div>
+    </div>
+  `).join('') : '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucune activité</div>';
+}
+
+// ── ANNUAIRE ──────────────────────────────────────────────────
+async function refreshPendingCount() {
+  const pending = await api('GET', '/pact/pending');
+  const count = Array.isArray(pending) ? pending.length : 0;
+  const badge = $('sb-notif');
+  badge.textContent = count;
+  badge.classList.toggle('visible', count > 0);
+}
+
+async function refreshPendingRequests() {
+  const pending = await api('GET', '/pact/pending');
+  const el = $('pending-list');
+  if (!Array.isArray(pending) || !pending.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucune demande en attente</div>';
+    return;
+  }
+  el.innerHTML = pending.map(r => `
+    <div class="pact-req-card">
+      <div class="user-card-avatar">${r.from_name.charAt(0).toUpperCase()}</div>
+      <div class="user-card-info">
+        <div class="user-card-name">${r.from_name}</div>
+        <div class="user-card-device">Demande de pacte reçue</div>
+      </div>
+      <div class="pact-req-actions">
+        <button class="btn-accept" onclick="acceptPact('${r.id}')">✓ Accepter</button>
+        <button class="btn-reject" onclick="rejectPact('${r.id}')">✗ Refuser</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function searchUsers() {
+  const q = $('search-query').value.trim();
+  if (!q) return;
+  showResult('search-result', '⏳ Recherche...', 'ok');
+  const results = await api('GET', `/users/search?q=${encodeURIComponent(q)}`);
+  if (results.error) return showResult('search-result', '❌ ' + results.error, 'err');
+  showResult('search-result', '', 'ok');
+  const el = $('search-results');
+  if (!results.length) { el.innerHTML = '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucun résultat</div>'; return; }
+  el.innerHTML = results.map(u => {
+    let actionBtn = '';
+    if (u.pact_status === 'accepted') {
+      actionBtn = '<span style="color:var(--green);font-size:.72rem;font-family:var(--mono)">✓ Pacte actif</span>';
+    } else if (u.pact_status === 'pending') {
+      actionBtn = '<span style="color:var(--yellow);font-size:.72rem;font-family:var(--mono)">⏳ En attente</span>';
+    } else {
+      actionBtn = `<button class="btn btn-purple" style="padding:6px 12px;font-size:.75rem" onclick="sendPactRequest('${u.id}')">⚡ Pacte</button>`;
+    }
+    return `
+      <div class="user-card">
+        <div class="user-card-avatar">${u.name.charAt(0).toUpperCase()}</div>
+        <div class="user-card-info">
+          <div class="user-card-name">${u.name}</div>
+          <div class="user-card-device">${u.device_id}</div>
+        </div>
+        ${actionBtn}
+      </div>`;
+  }).join('');
+}
+
+// Permettre recherche avec Entrée
+document.addEventListener('DOMContentLoaded', () => {
+  const sq = $('search-query');
+  if (sq) sq.addEventListener('keydown', e => { if (e.key === 'Enter') searchUsers(); });
+  const le = $('login-email');
+  const lp = $('login-password');
+  if (le) le.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  if (lp) lp.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+});
+
+async function sendPactRequest(toUserId) {
+  const r = await api('POST', '/pact/request', { to_user_id: toUserId });
+  if (r.error) return showResult('search-result', '❌ ' + r.error, 'err');
+  showResult('search-result', '✅ Demande envoyée ! L\'autre utilisateur doit l\'accepter dans l\'Annuaire.', 'ok');
+  searchUsers(); // Rafraîchir les statuts
+}
+
+async function acceptPact(requestId) {
+  const r = await api('POST', `/pact/accept/${requestId}`);
+  if (r.error) return alert('❌ ' + r.error);
+  await refresh();
+  await refreshPendingRequests();
+  showResult('search-result', '✅ ' + (r.message || 'Pacte établi !'), 'ok');
+}
+
+async function rejectPact(requestId) {
+  await api('POST', `/pact/reject/${requestId}`);
+  await refreshPendingRequests();
+  await refreshPendingCount();
+}
+
+// ── SIGNATURE CANVAS ──────────────────────────────────────────
+let sigDrawing = false, sigData = null;
+
+function initCanvas() {
+  const canvas = $('sig-canvas');
+  if (!canvas) return;
+  setTimeout(() => {
+    canvas.width = canvas.offsetWidth || 300;
+    canvas.height = 90;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const pos = e => {
+      const r = canvas.getBoundingClientRect();
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x: cx - r.left, y: cy - r.top };
+    };
+    canvas.addEventListener('mousedown', e => { sigDrawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); });
+    canvas.addEventListener('mousemove', e => { if (!sigDrawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+    canvas.addEventListener('mouseup', () => { sigDrawing = false; sigData = canvas.toDataURL(); });
+    canvas.addEventListener('mouseleave', () => { sigDrawing = false; });
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); sigDrawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }, { passive: false });
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); if (!sigDrawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }, { passive: false });
+    canvas.addEventListener('touchend', () => { sigDrawing = false; sigData = canvas.toDataURL(); });
+  }, 100);
+}
+
+function clearSig() {
+  const canvas = $('sig-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  sigData = null;
+}
+
+function saveSignature() {
+  if (!sigData) return showResult('acc-result', '❌ Dessinez d\'abord votre signature', 'err');
+  localStorage.setItem('enclave_signature', sigData);
+  showResult('acc-result', '✅ Signature sauvegardée', 'ok');
+}
+
+// ── SEND ──────────────────────────────────────────────────────
+function onFileSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  $('file-attached').textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+  $('file-attached').style.display = 'block';
+  $('attach-toggle').style.display = 'flex';
+}
+
+async function doSend() {
+  const contact_id = $('send-contact').value;
+  const subject = $('send-subject').value.trim();
+  const body = $('send-body').value.trim();
+  if (!subject || !body) return showResult('send-result', '❌ Sujet et corps requis', 'err');
+
+  showResult('send-result', '⏳ Chiffrement & dépôt sur NextCloud...', 'info');
+
+  let file_data = null, file_name = null;
+  const fileInput = $('file-input');
+  if (fileInput.files[0]) {
+    const file = fileInput.files[0];
+    file_name = file.name;
+    file_data = await new Promise(res => {
+      const reader = new FileReader();
+      reader.onload = e => res(e.target.result.split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  const r = await api('POST', '/send', { contact_id, subject, body, file_data, file_name });
+  if (r.error) return showResult('send-result', '❌ ' + r.error, 'err');
+
+  $('receive-key-id').value = r.key_id;
+  $('receive-contact').value = contact_id;
+  showResult('send-result', `✅ Message signé & déposé\n\nkey_id : ${r.key_id}${r.file_uploaded ? '\n📎 Pièce jointe incluse' : ''}`, 'ok');
+  $('send-pfs').style.display = 'block';
+  await refresh();
+}
+
+// ── RECEIVE ───────────────────────────────────────────────────
+async function doReceive() {
+  const contact_id = $('receive-contact').value;
+  const key_id = $('receive-key-id').value.trim();
+  if (!key_id) return showResult('receive-result', '❌ Key ID requis', 'err');
+
+  showResult('receive-result', '⏳ Récupération & vérification...', 'info');
+  const r = await api('POST', '/receive', { contact_id, key_id });
+  if (r.error) return showResult('receive-result', '❌ ' + r.error, 'err');
+
+  showResult('receive-result',
+    `✅ SIGNATURE VALIDE\n\nSujet : ${r.subject}\nMessage : ${r.body}${r.file_name ? '\n\n📎 Pièce jointe : ' + r.file_name : ''}\n\n${r.pfs}`,
+    'ok'
+  );
+  $('receive-pfs').style.display = 'block';
+  if (r.file_data && r.file_name) {
+    const a = document.createElement('a');
+    a.href = `data:application/octet-stream;base64,${r.file_data}`;
+    a.download = r.file_name;
+    a.click();
+  }
+  await refresh();
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+async function init() {
+  initNav();
+  const authenticated = await checkAuth();
+  if (authenticated) {
+    refresh();
+    initCanvas();
+  }
+  setInterval(async () => {
+    if (currentUser) {
+      refresh();
+      if (document.querySelector('.page.active')?.id === 'page-audit') refreshAudit();
+      if (document.querySelector('.page.active')?.id === 'page-annuaire') refreshPendingRequests();
+    }
+  }, 8000);
+}
+
+init();
+</script>
+</body>
+</html>
