@@ -86,14 +86,14 @@ async function getAuditLog(limit = 50) {
 async function getContacts() {
   const db = await getDb();
   const res = db.exec(
-    `SELECT c.id, c.owner_id, c.name, c.device_id, COUNT(k.id) as free_keys
+    `SELECT c.id, c.owner_id, c.name, c.device_id, c.shared_secret, COUNT(k.id) as free_keys
      FROM contacts c
      LEFT JOIN keys k ON k.contact_id=c.id AND k.status='free'
      GROUP BY c.id`
   );
   if (!res.length) return [];
-  return res[0].values.map(([id, owner_id, name, device_id, free_keys]) => ({
-    id, owner_id, name, device_id, free_keys
+  return res[0].values.map(([id, owner_id, name, device_id, shared_secret, free_keys]) => ({
+    id, owner_id, name, device_id, shared_secret, free_keys
   }));
 }
 

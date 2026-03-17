@@ -235,7 +235,10 @@ app.get("/status", authRequired, async (req, res) => {
 app.get("/contacts", authRequired, async (req, res) => {
   try {
     const all = await getContacts();
-    res.json(all.filter(c => c.owner_id === req.user.id));
+    const filtered = all
+      .filter(c => c.owner_id === req.user.id)
+      .map(c => ({ ...c, has_secret: !!c.shared_secret }));
+    res.json(filtered);
   } catch(e) { res.json([]); }
 });
 
@@ -354,13 +357,17 @@ app.post("/accept-pact", authRequired, async (req, res) => {
 
   try {
     const db = await require("./db").getDb();
-    const raw = db.exec("SELECT owner_id FROM contacts WHERE id=?", [contact_id]);
-    const contact = raw.length ? { owner_id: raw[0].values[0][0] } : {};
-    if (!contact.owner_id) return res.status(404).json({ error: "Contact inexistant." });
-    if (contact.owner_id !== req.user.id) return res.status(403).json({ error: "Non autorisé pour ce contact." });
+    const raw = db.exec("SELECT shared_secret FROM contacts WHERE id=?", [contact_id]);
+    const contact = raw.length ? { shared_secret: raw[0].values[0][0] } : {};
+    if (!contact.shared_secret && raw.length === 0) {
+      return res.status(404).json({ error: "Contact inexistant." });
+    }
+    if (contact.shared_secret && contact.shared_secret !== secret) {
+      return res.status(409).json({ error: "Secret incohérent ou déjà établi." });
+    }
 
     await setSharedSecret(contact_id, secret);
-    res.json({ success: true });
+    res.json({ success: true, message: "Secret partagé établi." });
   } catch (e) {
     console.error("accept-pact error:", e.message);
     res.status(500).json({ error: e.message });
