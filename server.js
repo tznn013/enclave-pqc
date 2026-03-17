@@ -10,7 +10,7 @@ const jwt     = require("jsonwebtoken");
 const bcrypt  = require("bcryptjs");
 
 const { sign, verify, decryptPayload } = require("./crypto");
-const { generateKeyPool, consumeKey, findAndConsumeKey, countAllFreeKeys, countFreeKeysForContact, getAuditLog, getContacts, getDeviceId, setSharedSecret, getSharedSecret } = require("./keyStore");
+const { generateKeyPool, generatePairedKeyPool, consumeKey, findAndConsumeKey, findAndConsumeKeyByPair, countAllFreeKeys, countFreeKeysForContact, getAuditLog, getContacts, getDeviceId, setSharedSecret, getSharedSecret } = require("./keyStore");
 const { depositMessage, retrieveMessage, deleteMessage, depositFile, retrieveFile, deleteFile } = require("./nextcloud");
 
 // Variables requises
@@ -205,10 +205,9 @@ app.post("/pact/accept/:id", sensitiveLimiter, authRequired, async (req, res) =>
     db.run("UPDATE pact_requests SET status='accepted' WHERE id=?", [req.params.id]);
     require("./db").save();
 
-    await generateKeyPool(cid1, 100);
-    await generateKeyPool(cid2, 100);
+    await generatePairedKeyPool(cid1, cid2, 100);
 
-    res.json({ success: true, message: "Canal chiffré établi — 200 clés générées." });
+    res.json({ success: true, message: "Canal chiffré établi — 200 clés (100 paires) générées." });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -285,26 +284,15 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
   const pairSecret = ct.shared_secret || await getSharedSecret(contact_id);
   if (!pairSecret) return res.status(400).json({ error: "Aucun secret - objet partagé manquant." });
 
+  const parts = (contact_id || "").split("-");
+  const partnerContactId = parts.length === 3 ? `contact-${parts[2]}-${parts[1]}` : null;
+  if (!partnerContactId) return res.status(400).json({ error: "Format contact_id invalide." });
+
   let keyData = await consumeKey(contact_id);
   if (!keyData) {
-    const freeKeysBefore = await countFreeKeysForContact(contact_id);
-    console.warn(`No free keys for contact ${contact_id} (${freeKeysBefore} found) - generating new batch`);
-    await generateKeyPool(contact_id, 100);
-    const freeKeysAfter = await countFreeKeysForContact(contact_id);
-    console.warn(`After generateKeyPool for ${contact_id}: freeKeys=${freeKeysAfter}`);
-
-    if (freeKeysAfter === 0) {
-      return res.status(500).json({
-        error: "Plus de clés disponibles même après rechargement.",
-        details: {
-          contact_id,
-          freeKeysBefore,
-          freeKeysAfter,
-          msg: "Aucune clé générée ? Vérifiez si contact_id est correct et si generateKeyPool fonctionne."
-        }
-      });
-    }
-
+    const freeKeys = await countFreeKeysForContact(contact_id);
+    console.warn(`No free keys for contact ${contact_id} (${freeKeys} found) - generating paired batch`);
+    await generatePairedKeyPool(contact_id, partnerContactId, 100);
     keyData = await consumeKey(contact_id);
     if (!keyData) {
       return res.status(500).json({ error: "Plus de clés disponibles même après rechargement. Contactez l'administrateur." });
@@ -319,9 +307,9 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
       fileUploaded = true;
     }
     const result = sign(subject, finalBody, pairSecret, keyData.keyBlob);
-    const payload = { v: 3, key_id: keyData.id, device_id: await getDeviceId(), from_user_id: req.user.id, encrypted_subject: result.encrypted_subject, subject_len: result.subject_len, encrypted_body: result.encrypted_body, body_len: result.body_len, ciphertext_b64: result.ciphertext_b64, file_name: fileUploaded ? file_name : null, sent_at: Date.now() };
+    const payload = { v: 3, key_id: keyData.id, pair_id: keyData.pairId, device_id: await getDeviceId(), from_user_id: req.user.id, encrypted_subject: result.encrypted_subject, subject_len: result.subject_len, encrypted_body: result.encrypted_body, body_len: result.body_len, ciphertext_b64: result.ciphertext_b64, file_name: fileUploaded ? file_name : null, sent_at: Date.now() };
     await depositMessage(keyData.id, payload);
-    res.json({ success: true, key_id: keyData.id, file_uploaded: fileUploaded, message: "Message chiffré & déposé." });
+    res.json({ success: true, key_id: keyData.id, pair_id: keyData.pairId, file_uploaded: fileUploaded, message: "Message chiffré & déposé." });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -340,8 +328,18 @@ app.post("/receive", sensitiveLimiter, authRequired, async (req, res) => {
     const payload = await retrieveMessage(key_id);
     if (!payload) return res.status(404).json({ error: "Message introuvable." });
     const pairSecret = await getSharedSecret(contact_id);
-    const keyData = await findAndConsumeKey(key_id, contact_id);
-    if (!keyData) return res.status(400).json({ error: "Clé déjà détruite." });
+
+    let keyData = null;
+    if (payload.pair_id) {
+      keyData = await findAndConsumeKeyByPair(contact_id, payload.pair_id);
+    }
+
+    if (!keyData) {
+      // Backwards compatibility (ancienne version sans pair_id)
+      keyData = await findAndConsumeKey(key_id, contact_id);
+    }
+
+    if (!keyData) return res.status(400).json({ error: "Clé déjà détruite ou non disponible." });
     const { subject, body } = decryptPayload(payload, keyData.keyBlob);
     const ok = verify(subject, body, pairSecret, keyData.keyBlob, payload.ciphertext_b64);
     if (!ok) {

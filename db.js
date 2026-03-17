@@ -41,7 +41,8 @@ async function getDb() {
       id TEXT PRIMARY KEY,
       contact_id TEXT NOT NULL,
       key_blob BLOB NOT NULL,
-      status TEXT NOT NULL DEFAULT 'free'
+      status TEXT NOT NULL DEFAULT 'free',
+      pair_id TEXT
     );
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +52,13 @@ async function getDb() {
     );
     CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
+
+  // Migration for older DB where keys.pair_id did not exist
+  try {
+    db.run("ALTER TABLE keys ADD COLUMN pair_id TEXT");
+  } catch (e) {
+    // ignore if already exists or unsupported
+  }
 
   db.run("INSERT OR IGNORE INTO config (key,value) VALUES (?,?)", ["device_id", "enclave-" + crypto.randomBytes(4).toString("hex")]);
   db.run("INSERT OR IGNORE INTO config (key,value) VALUES (?,?)", ["version", "3.0.0"]);

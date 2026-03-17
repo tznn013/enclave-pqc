@@ -20,17 +20,41 @@ async function generateKeyPool(contactId, count = 50) {
   return ids;
 }
 
+async function generatePairedKeyPool(contactA, contactB, count = 50) {
+  const db = await getDb();
+  const ids = [];
+
+  for (let i = 0; i < count; i++) {
+    const pairId = "pair-" + crypto.randomBytes(8).toString("hex");
+    const keyBlob = crypto.randomBytes(KEY_SIZE);
+
+    const idA = "key-" + crypto.randomBytes(8).toString("hex");
+    const idB = "key-" + crypto.randomBytes(8).toString("hex");
+
+    db.run("INSERT INTO keys (id,contact_id,key_blob,status,pair_id) VALUES (?,?,?,'free',?)", [idA, contactA, keyBlob, pairId]);
+    db.run("INSERT INTO keys (id,contact_id,key_blob,status,pair_id) VALUES (?,?,?,'free',?)", [idB, contactB, keyBlob, pairId]);
+    db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'GENERATED',?)", [idA, contactA, `Paired ${i+1}/${count} (${pairId})`]);
+    db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'GENERATED',?)", [idB, contactB, `Paired ${i+1}/${count} (${pairId})`]);
+
+    ids.push({ keyA: idA, keyB: idB, pairId });
+  }
+
+  save();
+  return ids;
+}
+
 // FIX: Remplacé db.exec() avec interpolation par db.prepare() + bind
 async function consumeKey(contactId) {
   const db = await getDb();
 
   while (true) {
-    const stmt = db.prepare("SELECT id, key_blob FROM keys WHERE contact_id=? AND status='free' LIMIT 1");
-    const res = stmt.getAsObject({ 1: contactId });
+    const stmt = db.prepare("SELECT id, key_blob, pair_id FROM keys WHERE contact_id=? AND status='free' LIMIT 1");
+    stmt.bind([contactId]);
+    if (!stmt.step()) { stmt.free(); return null; }
+    const res = stmt.getAsObject();
     stmt.free();
-    if (!res.id) return null;
 
-    const { id, key_blob: keyBlob } = res;
+    const { id, key_blob: keyBlob, pair_id: pairId } = res;
     db.run("UPDATE keys SET status='used' WHERE id=? AND status='free'", [id]);
 
     const verify = db.exec("SELECT status FROM keys WHERE id=?", [id]);
@@ -39,7 +63,7 @@ async function consumeKey(contactId) {
     if (status === 'used') {
       db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'USED','Signed - awaiting verification')", [id, contactId]);
       save();
-      return { id, keyBlob: Buffer.from(keyBlob) };
+      return { id, keyBlob: Buffer.from(keyBlob), pairId: pairId || null };
     }
 
     // Possible race: key was consumed par un autre processus. Retente.
@@ -51,15 +75,31 @@ async function consumeKey(contactId) {
 async function findAndConsumeKey(keyId, contactId) {
   const db = await getDb();
   const stmt = db.prepare("SELECT id, key_blob FROM keys WHERE id=? AND contact_id=? AND status='used'");
-  const res = stmt.getAsObject({ 1: keyId, 2: contactId });
+  stmt.bind([keyId, contactId]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const res = stmt.getAsObject();
   stmt.free();
-  if (!res.id) return null;
 
   const { id, key_blob: keyBlob } = res;
   db.run("DELETE FROM keys WHERE id=?", [id]);
   db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'DESTROYED','Verified - PFS guaranteed')", [id, contactId]);
   save();
   return { id, keyBlob: Buffer.from(keyBlob) };
+}
+
+async function findAndConsumeKeyByPair(contactId, pairId) {
+  const db = await getDb();
+  const stmt = db.prepare("SELECT id, key_blob FROM keys WHERE contact_id=? AND pair_id=? AND status='free' LIMIT 1");
+  stmt.bind([contactId, pairId]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const res = stmt.getAsObject();
+  if (!res.id) return null;
+
+  const { id, key_blob: keyBlob } = res;
+  db.run("UPDATE keys SET status='used' WHERE id=? AND status='free'", [id]);
+  db.run("INSERT INTO audit_log (key_id,contact_id,action,detail) VALUES (?,?,'USED','Received - PFS check')", [id, contactId]);
+  save();
+  return { id, keyBlob: Buffer.from(keyBlob), pairId };
 }
 
 async function countAllFreeKeys() {
@@ -71,7 +111,9 @@ async function countAllFreeKeys() {
 async function countFreeKeysForContact(contactId) {
   const db = await getDb();
   const stmt = db.prepare("SELECT COUNT(*) AS total FROM keys WHERE contact_id=? AND status='free'");
-  const row = stmt.getAsObject({ 1: contactId });
+  stmt.bind([contactId]);
+  if (!stmt.step()) { stmt.free(); return 0; }
+  const row = stmt.getAsObject();
   stmt.free();
   return row.total || 0;
 }
@@ -118,7 +160,9 @@ async function setSharedSecret(contactId, secret) {
 async function getSharedSecret(contactId) {
   const db = await getDb();
   const stmt = db.prepare("SELECT shared_secret FROM contacts WHERE id=?");
-  const res = stmt.getAsObject({ 1: contactId });
+  stmt.bind([contactId]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const res = stmt.getAsObject();
   stmt.free();
   if (!res.shared_secret) return null;
   return res.shared_secret;
@@ -131,7 +175,7 @@ async function getDeviceId() {
 }
 
 module.exports = {
-  generateKeyPool, consumeKey, findAndConsumeKey,
+  generateKeyPool, generatePairedKeyPool, consumeKey, findAndConsumeKey, findAndConsumeKeyByPair,
   countAllFreeKeys, countFreeKeysForContact, getAuditLog, getContacts, getDeviceId,
   setSharedSecret, getSharedSecret
 };
