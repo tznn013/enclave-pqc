@@ -10,7 +10,7 @@ const jwt     = require("jsonwebtoken");
 const bcrypt  = require("bcryptjs");
 
 const { sign, verify, decryptPayload } = require("./crypto");
-const { generateKeyPool, consumeKey, findAndConsumeKey, countAllFreeKeys, getAuditLog, getContacts, getDeviceId, setSharedSecret, getSharedSecret } = require("./keyStore");
+const { generateKeyPool, consumeKey, findAndConsumeKey, countAllFreeKeys, countFreeKeysForContact, getAuditLog, getContacts, getDeviceId, setSharedSecret, getSharedSecret } = require("./keyStore");
 const { depositMessage, retrieveMessage, deleteMessage, depositFile, retrieveFile, deleteFile } = require("./nextcloud");
 
 // Variables requises
@@ -284,8 +284,17 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
   // Utiliser le shared_secret déjà validé côté contact pour éviter incohérence
   const pairSecret = ct.shared_secret || await getSharedSecret(contact_id);
   if (!pairSecret) return res.status(400).json({ error: "Aucun secret - objet partagé manquant." });
-  const keyData = await consumeKey(contact_id);
-  if (!keyData) return res.status(400).json({ error: "Plus de clés disponibles." });
+
+  let keyData = await consumeKey(contact_id);
+  if (!keyData) {
+    const freeKeys = await countFreeKeysForContact(contact_id);
+    console.warn(`No free keys for contact ${contact_id} (${freeKeys} found) - generating new batch`);
+    await generateKeyPool(contact_id, 100);
+    keyData = await consumeKey(contact_id);
+    if (!keyData) {
+      return res.status(500).json({ error: "Plus de clés disponibles même après rechargement. Contactez l'administrateur." });
+    }
+  }
 
   try {
     let finalBody = body, fileUploaded = false;

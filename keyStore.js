@@ -65,6 +65,12 @@ async function countAllFreeKeys() {
   return res.length ? res[0].values[0][0] : 0;
 }
 
+async function countFreeKeysForContact(contactId) {
+  const db = await getDb();
+  const res = db.exec("SELECT COUNT(*) FROM keys WHERE contact_id=? AND status='free'", [contactId]);
+  return res.length ? res[0].values[0][0] : 0;
+}
+
 // FIX: limit est un entier, on le cast pour éviter toute injection
 async function getAuditLog(limit = 50) {
   const db = await getDb();
@@ -121,6 +127,6 @@ async function getDeviceId() {
 
 module.exports = {
   generateKeyPool, consumeKey, findAndConsumeKey,
-  countAllFreeKeys, getAuditLog, getContacts, getDeviceId,
+  countAllFreeKeys, countFreeKeysForContact, getAuditLog, getContacts, getDeviceId,
   setSharedSecret, getSharedSecret
 };
