@@ -2,7 +2,11 @@ const initSqlJs = require("sql.js");
 const fs = require("fs");
 const crypto = require("crypto");
 
-const DB_PATH = "./enclave.db";
+const path = require("path");
+// Railway : le filesystem est éphémère, on préfère /tmp qui survit aux redémarrages à chaud
+// mais pas aux re-déploiements. Pour une vraie persistance, utiliser Railway Volumes.
+const DB_PATH = process.env.DB_PATH || path.join(require("os").tmpdir(), "enclave.db");
+console.log("DB path:", DB_PATH);
 let db = null;
 
 async function getDb() {

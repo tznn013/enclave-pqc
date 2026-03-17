@@ -78,7 +78,7 @@ app.post("/auth/register", authLimiter, async (req, res) => {
     if (ex.id) return res.status(409).json({ error: "Cet email est déjà utilisé." });
     const id = "user-" + crypto.randomBytes(8).toString("hex");
     const device_id = "dev-" + crypto.randomBytes(4).toString("hex");
-    const hash = await bcrypt.hash(password, 12);
+    const hash = await bcrypt.hash(password, 10);
     db.run("INSERT INTO users (id,email,password_hash,name,device_id) VALUES (?,?,?,?,?)", [id, email.toLowerCase(), hash, name.trim(), device_id]);
     require("./db").save();
     console.log('User registered:', email.toLowerCase(), id);
@@ -267,36 +267,31 @@ app.get("/audit", authRequired, async (req, res) => {
 
 // POST /send
 app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
-  console.log('DEBUG /send called', { user: req.user?.id, subject: req.body?.subject, contact_id: req.body?.contact_id });
   const { subject, body, contact_id, file_data, file_name } = req.body;
   if (!subject || !body || !contact_id) return res.status(400).json({ error: "Champs manquants." });
 
-  let ct = {};
+  let pairSecret = null, partnerContactId = null;
   try {
     const db = await require("./db").getDb();
+    // Vérifier que le contact appartient à l'utilisateur connecté
     const _ra = db.exec("SELECT id,shared_secret FROM contacts WHERE id=? AND owner_id=?", [contact_id, req.user.id]);
-    ct = _ra.length ? { id: _ra[0].values[0][0], shared_secret: _ra[0].values[0][1] } : {};
+    const ct = _ra.length ? { id: _ra[0].values[0][0], shared_secret: _ra[0].values[0][1] } : {};
     if (!ct.id) return res.status(403).json({ error: "Contact non autorisé." });
-    if (!ct.shared_secret) return res.status(400).json({ error: "Aucun secret - le pacte n'a pas encore été accepté ou a été réinitialisé." });
-  } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
-
-  // Utiliser le shared_secret déjà validé côté contact pour éviter incohérence
-  const pairSecret = ct.shared_secret || await getSharedSecret(contact_id);
-  if (!pairSecret) return res.status(400).json({ error: "Aucun secret - objet partagé manquant." });
-
-  const parts = (contact_id || "").split("-");
-  const partnerContactId = parts.length === 3 ? `contact-${parts[2]}-${parts[1]}` : null;
-  if (!partnerContactId) return res.status(400).json({ error: "Format contact_id invalide." });
+    if (!ct.shared_secret) return res.status(400).json({ error: "Aucun secret — le pacte n'a pas encore été accepté." });
+    pairSecret = ct.shared_secret;
+    // Retrouve le contact pair (même secret, autre propriétaire) pour recharger les clés si besoin
+    const _rp = db.exec("SELECT id FROM contacts WHERE shared_secret=? AND owner_id!=? LIMIT 1", [pairSecret, req.user.id]);
+    partnerContactId = _rp.length ? _rp[0].values[0][0] : null;
+  } catch(e) { return res.status(500).json({ error: "Erreur vérification : " + e.message }); }
 
   let keyData = await consumeKey(contact_id);
   if (!keyData) {
-    const freeKeys = await countFreeKeysForContact(contact_id);
-    console.warn(`No free keys for contact ${contact_id} (${freeKeys} found) - generating paired batch`);
-    await generatePairedKeyPool(contact_id, partnerContactId, 100);
-    keyData = await consumeKey(contact_id);
-    if (!keyData) {
-      return res.status(500).json({ error: "Plus de clés disponibles même après rechargement. Contactez l'administrateur." });
+    if (partnerContactId) {
+      console.warn(`No free keys for ${contact_id} — generating paired batch`);
+      await generatePairedKeyPool(contact_id, partnerContactId, 100);
+      keyData = await consumeKey(contact_id);
     }
+    if (!keyData) return res.status(400).json({ error: "Plus de clés disponibles. Réactivez le pacte." });
   }
 
   try {
@@ -377,7 +372,7 @@ app.get("/import-pact", async (req, res) => {
   res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Enclave</title><style>body{background:#060910;color:#e2eeff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;}.card{background:#0b0f1a;border:1px solid #1c2840;border-radius:16px;padding:28px;max-width:400px;width:100%;text-align:center;}h1{color:#00e5ff;}button{background:#00e5ff;color:#000;border:none;border-radius:10px;padding:14px;font-weight:700;cursor:pointer;width:100%;margin-top:16px;}</style></head><body><div class="card"><h1>🔐 ENCLAVE PQC</h1><p>Pacte de <strong>${sf}</strong></p><button onclick="importPact()">Accepter le Pacte</button><div id="ok" style="display:none;color:#00e676;margin-top:15px;">✅ Pacte établi !</div></div><script>async function importPact(){const r=await fetch('/accept-pact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contact_id:${sc},secret:${ss}})});const d=await r.json();if(d.success)document.getElementById('ok').style.display='block';}</script></body></html>`);
 });
 
-app.post("/accept-pact", authRequired, async (req, res) => {
+app.post("/accept-pact", async (req, res) => {
   const { contact_id, secret } = req.body;
   if (!contact_id || !secret) return res.status(400).json({ error: "Champs manquants." });
 
