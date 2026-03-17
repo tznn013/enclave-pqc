@@ -297,12 +297,20 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
   try {
     let finalBody = body, fileUploaded = false;
     if (file_data && file_name) {
-      await depositFile(keyData.id, Buffer.from(file_data, "base64"), file_name);
+      // Chiffrement XOR du fichier avec la clé OTP (bytes 0..N XOR clé cyclique)
+      const rawBuffer = Buffer.from(file_data, "base64");
+      const encryptedFile = Buffer.alloc(rawBuffer.length);
+      for (let i = 0; i < rawBuffer.length; i++) {
+        encryptedFile[i] = rawBuffer[i] ^ keyData.keyBlob[i % keyData.keyBlob.length];
+      }
+      await depositFile(keyData.id, encryptedFile, file_name + ".enc");
       finalBody += `\n\n[PJ: ${file_name}]`;
       fileUploaded = true;
     }
     const result = sign(subject, finalBody, pairSecret, keyData.keyBlob);
-    const payload = { v: 3, key_id: keyData.id, pair_id: keyData.pairId, device_id: await getDeviceId(), from_user_id: req.user.id, encrypted_subject: result.encrypted_subject, subject_len: result.subject_len, encrypted_body: result.encrypted_body, body_len: result.body_len, ciphertext_b64: result.ciphertext_b64, file_name: fileUploaded ? file_name : null, sent_at: Date.now() };
+    const payload = { v: 3, key_id: keyData.id, pair_id: keyData.pairId, device_id: await getDeviceId(), from_user_id: req.user.id, encrypted_subject: result.encrypted_subject, subject_len: result.subject_len, encrypted_body: result.encrypted_body, body_len: result.body_len, ciphertext_b64: result.ciphertext_b64, file_name: fileUploaded ? file_name : null,
+      sent_at: Date.now()
+    };
     await depositMessage(keyData.id, payload);
     res.json({ success: true, key_id: keyData.id, pair_id: keyData.pairId, file_uploaded: fileUploaded, message: "Message chiffré & déposé." });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -344,8 +352,16 @@ app.post("/receive", sensitiveLimiter, authRequired, async (req, res) => {
     }
     let fileData = null;
     if (payload.file_name) {
-      const fb = await retrieveFile(key_id, payload.file_name);
-      if (fb) { fileData = fb.toString("base64"); await deleteFile(key_id, payload.file_name); }
+      const fb = await retrieveFile(key_id, payload.file_name + ".enc");
+      if (fb) {
+        // Déchiffrement XOR avec la même clé OTP
+        const decryptedFile = Buffer.alloc(fb.length);
+        for (let i = 0; i < fb.length; i++) {
+          decryptedFile[i] = fb[i] ^ keyData.keyBlob[i % keyData.keyBlob.length];
+        }
+        fileData = decryptedFile.toString("base64");
+        await deleteFile(key_id, payload.file_name + ".enc");
+      }
     }
     await deleteMessage(key_id);
     res.json({ valid: true, subject, body, file_name: payload.file_name, file_data: fileData, sent_at: payload.sent_at, pfs: "Clé détruite + message supprimé." });

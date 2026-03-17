@@ -1327,6 +1327,15 @@ function saveSignature() {
 function onFileSelect(input) {
   const file = input.files[0];
   if (!file) return;
+  const sizeMB = file.size / (1024 * 1024);
+  if (sizeMB > 5) {
+    showResult('send-result', `⚠️ Fichier volumineux (${sizeMB.toFixed(1)} MB) — l'envoi peut prendre du temps.`, 'info');
+  }
+  if (sizeMB > 20) {
+    input.value = '';
+    showResult('send-result', '❌ Fichier trop volumineux (20 MB max)', 'err');
+    return;
+  }
   $('file-attached').textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
   $('file-attached').style.display = 'block';
   $('attach-toggle').style.display = 'flex';

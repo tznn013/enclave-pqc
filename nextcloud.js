@@ -96,7 +96,7 @@ async function depositFile(keyId, fileBuffer, fileName) {
       "Content-Type": "application/octet-stream"
     },
     body: fileBuffer
-  }, 20000);
+  }, 60000);
 
   if (res.status === 201 || res.status === 204) {
     return { success: true, fileName: `${keyId}_${fileName}` };
