@@ -287,9 +287,24 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
 
   let keyData = await consumeKey(contact_id);
   if (!keyData) {
-    const freeKeys = await countFreeKeysForContact(contact_id);
-    console.warn(`No free keys for contact ${contact_id} (${freeKeys} found) - generating new batch`);
+    const freeKeysBefore = await countFreeKeysForContact(contact_id);
+    console.warn(`No free keys for contact ${contact_id} (${freeKeysBefore} found) - generating new batch`);
     await generateKeyPool(contact_id, 100);
+    const freeKeysAfter = await countFreeKeysForContact(contact_id);
+    console.warn(`After generateKeyPool for ${contact_id}: freeKeys=${freeKeysAfter}`);
+
+    if (freeKeysAfter === 0) {
+      return res.status(500).json({
+        error: "Plus de clés disponibles même après rechargement.",
+        details: {
+          contact_id,
+          freeKeysBefore,
+          freeKeysAfter,
+          msg: "Aucune clé générée ? Vérifiez si contact_id est correct et si generateKeyPool fonctionne."
+        }
+      });
+    }
+
     keyData = await consumeKey(contact_id);
     if (!keyData) {
       return res.status(500).json({ error: "Plus de clés disponibles même après rechargement. Contactez l'administrateur." });

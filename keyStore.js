@@ -70,8 +70,10 @@ async function countAllFreeKeys() {
 
 async function countFreeKeysForContact(contactId) {
   const db = await getDb();
-  const res = db.exec("SELECT COUNT(*) FROM keys WHERE contact_id=? AND status='free'", [contactId]);
-  return res.length ? res[0].values[0][0] : 0;
+  const stmt = db.prepare("SELECT COUNT(*) AS total FROM keys WHERE contact_id=? AND status='free'");
+  const row = stmt.getAsObject({ 1: contactId });
+  stmt.free();
+  return row.total || 0;
 }
 
 // FIX: limit est un entier, on le cast pour éviter toute injection
