@@ -268,12 +268,15 @@ app.get("/audit", authRequired, async (req, res) => {
 
 // POST /send
 app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
+  console.log('DEBUG /send called', { user: req.user?.id, subject: req.body?.subject, contact_id: req.body?.contact_id });
   const { subject, body, contact_id, file_data, file_name } = req.body;
   if (!subject || !body || !contact_id) return res.status(400).json({ error: "Champs manquants." });
+
+  let ct = {};
   try {
     const db = await require("./db").getDb();
     const _ra = db.exec("SELECT id,shared_secret FROM contacts WHERE id=? AND owner_id=?", [contact_id, req.user.id]);
-    const ct = _ra.length ? { id: _ra[0].values[0][0], shared_secret: _ra[0].values[0][1] } : {};
+    ct = _ra.length ? { id: _ra[0].values[0][0], shared_secret: _ra[0].values[0][1] } : {};
     if (!ct.id) return res.status(403).json({ error: "Contact non autorisé." });
     if (!ct.shared_secret) return res.status(400).json({ error: "Aucun secret - le pacte n'a pas encore été accepté ou a été réinitialisé." });
   } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
