@@ -821,10 +821,7 @@ canvas { display: block; width: 100%; cursor: crosshair; }
       <button class="nav-item" data-page="receive">
         <span class="nav-item-icon">📥</span> Recevoir
       </button>
-      <button class="nav-item" data-page="audit">
-        <span class="nav-item-icon">📋</span> Audit
-        <span class="nav-badge" id="sb-keys">—</span>
-      </button>
+      <!-- Audit accessible admin uniquement via x-admin-key -->
     </nav>
     <div class="sidebar-footer">
       <div>XOR OTP · SHA-256 · SQLite</div>
@@ -855,7 +852,7 @@ canvas { display: block; width: 100%; cursor: crosshair; }
         <button class="mobile-nav-item" data-page="account">👤 Compte</button>
         <button class="mobile-nav-item" data-page="send">📤 Envoyer</button>
         <button class="mobile-nav-item" data-page="receive">📥 Recevoir</button>
-        <button class="mobile-nav-item" data-page="audit">📋 Audit</button>
+        
       </div>
     </div>
 
@@ -931,17 +928,26 @@ canvas { display: block; width: 100%; cursor: crosshair; }
             <div class="account-device" id="acc-device">—</div>
           </div>
         </div>
-        <canvas id="sig-preview" height="70" style="border-radius:8px;background:var(--surface2);width:100%"></canvas>
       </div>
+
       <div class="card">
-        <div class="card-title">Ma signature</div>
-        <div class="form-label">Dessinez votre signature</div>
-        <div class="canvas-wrap">
-          <canvas id="sig-canvas" height="90"></canvas>
-        </div>
-        <button class="btn btn-ghost" onclick="clearSig()">↺ Effacer</button>
-        <button class="btn btn-purple" onclick="saveSignature()">💾 Sauvegarder la signature</button>
-        <div class="result" id="acc-result"></div>
+        <div class="card-title">🔑 Changer le mot de passe</div>
+        <div class="form-label">Mot de passe actuel</div>
+        <input class="form-input" id="pwd-current" type="password" placeholder="••••••••">
+        <div class="form-label">Nouveau mot de passe <span style="color:var(--muted);font-size:.65rem">(8 caractères min)</span></div>
+        <input class="form-input" id="pwd-new" type="password" placeholder="••••••••">
+        <div class="form-label">Confirmer le nouveau mot de passe</div>
+        <input class="form-input" id="pwd-confirm" type="password" placeholder="••••••••">
+        <button class="btn btn-purple" onclick="changePassword()">Changer le mot de passe</button>
+        <div class="result" id="pwd-result"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🗑️ Révoquer un pacte</div>
+        <p style="font-size:.78rem;color:var(--text2);margin-bottom:12px">Supprime le canal chiffré avec ce contact ainsi que toutes les clés OTP associées. Action irréversible.</p>
+        <select class="form-select" id="revoke-contact"></select>
+        <button class="btn btn-ghost" style="border-color:var(--red);color:var(--red);margin-top:8px" onclick="revokePact()">🗑️ Révoquer ce pacte</button>
+        <div class="result" id="revoke-result"></div>
       </div>
     </div>
 
@@ -1111,7 +1117,7 @@ function initNav() {
       $(`page-${page}`)?.classList.add('active');
       document.querySelectorAll(`[data-page="${page}"]`).forEach(b => b.classList.add('active'));
       if (page === 'audit') refreshAudit();
-      if (page === 'account') setTimeout(initCanvas, 50);
+      if (page === 'account') { setTimeout(initCanvas, 50); refreshContacts(); }
       if (page === 'annuaire') refreshPendingRequests();
     });
   });
@@ -1159,7 +1165,7 @@ async function refreshContacts() {
     </div>
   `).join('') : '<div style="color:var(--muted);font-size:.78rem;font-family:var(--mono)">Aucun contact — établissez un pacte via l\'Annuaire</div>';
 
-  const selects = ['send-contact', 'receive-contact'];
+  const selects = ['send-contact', 'receive-contact', 'revoke-contact'];
   selects.forEach(id => {
     const sel = $(id);
     if (!sel) return;
@@ -1392,6 +1398,34 @@ async function doReceive() {
     a.download = r.file_name;
     a.click();
   }
+  await refresh();
+}
+
+// ── COMPTE ────────────────────────────────────────────────────
+async function changePassword() {
+  const current = $('pwd-current').value;
+  const newPwd = $('pwd-new').value;
+  const confirm = $('pwd-confirm').value;
+  if (!current || !newPwd || !confirm) return showResult('pwd-result', '❌ Tous les champs sont requis.', 'err');
+  if (newPwd !== confirm) return showResult('pwd-result', '❌ Les mots de passe ne correspondent pas.', 'err');
+  if (newPwd.length < 8) return showResult('pwd-result', '❌ Minimum 8 caractères.', 'err');
+  const r = await api('POST', '/auth/change-password', { current_password: current, new_password: newPwd });
+  if (r.error) return showResult('pwd-result', '❌ ' + r.error, 'err');
+  showResult('pwd-result', '✅ Mot de passe modifié !', 'ok');
+  $('pwd-current').value = '';
+  $('pwd-new').value = '';
+  $('pwd-confirm').value = '';
+}
+
+async function revokePact() {
+  const contact_id = $('revoke-contact').value;
+  if (!contact_id) return showResult('revoke-result', '❌ Sélectionnez un contact.', 'err');
+  const contact = contacts.find(c => c.id === contact_id);
+  const name = contact ? contact.name : contact_id;
+  if (!confirm(`Révoquer le pacte avec ${name} ? Cette action est irréversible.`)) return;
+  const r = await api('DELETE', `/pact/${contact_id}`);
+  if (r.error) return showResult('revoke-result', '❌ ' + r.error, 'err');
+  showResult('revoke-result', '✅ Pacte révoqué.', 'ok');
   await refresh();
 }
 

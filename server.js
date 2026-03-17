@@ -224,6 +224,55 @@ app.post("/pact/reject/:id", authRequired, async (req, res) => {
   } catch(e) { console.error('Error:', e.message); res.status(500).json({ error: e.message }); }
 });
 
+// POST /auth/change-password
+app.post("/auth/change-password", authLimiter, authRequired, async (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: "Champs manquants." });
+  if (String(new_password).length < 8) return res.status(400).json({ error: "Nouveau mot de passe trop court (8 caractères min)." });
+  if (current_password === new_password) return res.status(400).json({ error: "Le nouveau mot de passe doit être différent." });
+  try {
+    const db = await require("./db").getDb();
+    const _r = db.exec("SELECT password_hash FROM users WHERE id=?", [req.user.id]);
+    const user = _r.length ? { password_hash: _r[0].values[0][0] } : {};
+    if (!user.password_hash) return res.status(404).json({ error: "Utilisateur introuvable." });
+    const valid = await bcrypt.compare(current_password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: "Mot de passe actuel incorrect." });
+    const newHash = await bcrypt.hash(new_password, 10);
+    db.run("UPDATE users SET password_hash=? WHERE id=?", [newHash, req.user.id]);
+    require("./db").save();
+    res.json({ success: true, message: "Mot de passe modifié avec succès." });
+  } catch(e) { console.error("change-password error:", e.message); res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /pact/:contact_id — révoque un pacte et supprime les clés associées
+app.delete("/pact/:contact_id", authRequired, async (req, res) => {
+  const contact_id = req.params.contact_id;
+  try {
+    const db = await require("./db").getDb();
+    // Vérifier que le contact appartient à l'utilisateur
+    const _r = db.exec("SELECT id,shared_secret FROM contacts WHERE id=? AND owner_id=?", [contact_id, req.user.id]);
+    const contact = _r.length ? { id: _r[0].values[0][0], shared_secret: _r[0].values[0][1] } : {};
+    if (!contact.id) return res.status(404).json({ error: "Contact introuvable." });
+
+    // Supprimer aussi le contact pair (même secret, autre propriétaire)
+    if (contact.shared_secret) {
+      db.run("DELETE FROM contacts WHERE shared_secret=?", [contact.shared_secret]);
+    } else {
+      db.run("DELETE FROM contacts WHERE id=?", [contact_id]);
+    }
+
+    // Supprimer toutes les clés liées aux deux contacts
+    const _rk = db.exec("SELECT id FROM contacts WHERE shared_secret=?", [contact.shared_secret]);
+    db.run("DELETE FROM keys WHERE contact_id=?", [contact_id]);
+
+    // Marquer les pact_requests comme révoqués
+    db.run("UPDATE pact_requests SET status='revoked' WHERE (from_user_id=? OR to_user_id=?) AND status='accepted'", [req.user.id, req.user.id]);
+
+    require("./db").save();
+    res.json({ success: true, message: "Pacte révoqué et clés supprimées." });
+  } catch(e) { console.error("revoke pact error:", e.message); res.status(500).json({ error: e.message }); }
+});
+
 // GET /status
 app.get("/status", authRequired, async (req, res) => {
   const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
