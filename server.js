@@ -278,7 +278,8 @@ app.post("/send", sensitiveLimiter, authRequired, async (req, res) => {
     if (!ct.shared_secret) return res.status(400).json({ error: "Aucun secret - le pacte n'a pas encore été accepté ou a été réinitialisé." });
   } catch(e) { return res.status(500).json({ error: "Erreur vérification." }); }
 
-  const pairSecret = await getSharedSecret(contact_id);
+  // Utiliser le shared_secret déjà validé côté contact pour éviter incohérence
+  const pairSecret = ct.shared_secret || await getSharedSecret(contact_id);
   if (!pairSecret) return res.status(400).json({ error: "Aucun secret - objet partagé manquant." });
   const keyData = await consumeKey(contact_id);
   if (!keyData) return res.status(400).json({ error: "Plus de clés disponibles." });
